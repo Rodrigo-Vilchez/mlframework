@@ -5,6 +5,7 @@
 #include "mlframework/dataloader.hpp"
 #include "mlframework/layer.hpp"
 #include "mlframework/loss.hpp"
+#include "mlframework/mlp.hpp"
 #include "mlframework/ops.hpp"
 #include "mlframework/optimizer.hpp"
 #include "mlframework/tensor.hpp"
@@ -207,6 +208,36 @@ void test_mnist_loader() {
     std::cout << "[OK] MNIST loader\n";
 }
 
+void test_mlp_forward_shape() {
+    MLP model(784, {128, 64}, 10);
+    auto x = make_tensor({32, 784}, std::vector<float>(32 * 784, 0.5F));
+    auto out = model.forward(x);
+    assert(out->shape[0] == 32);
+    assert(out->shape[1] == 10);
+    std::cout << "[OK] MLP forward shape\n";
+}
+
+void test_mlp_backward_runs() {
+    MLP model(784, {128, 64}, 10);
+    auto x = make_tensor({4, 784}, std::vector<float>(4 * 784, 0.5F));
+    auto labels = make_tensor({4}, std::vector<float>{0.0F, 1.0F, 2.0F, 3.0F});
+    auto logits = model.forward(x);
+    auto loss = cross_entropy(logits, labels);
+    loss->backward();
+    // all parameter grads should be non-zero
+    for (auto& p : model.parameters()) {
+        bool any_nonzero = false;
+        for (float g : p->grad) {
+            if (g != 0.0F) {
+                any_nonzero = true;
+                break;
+            }
+        }
+        assert(any_nonzero);
+    }
+    std::cout << "[OK] MLP backward runs\n";
+}
+
 int main() {
     test_constructor_zeros();
     test_constructor_data();
@@ -227,6 +258,8 @@ int main() {
     test_cross_entropy_uniform_prediction();
     test_cross_entropy_backward();
     test_mnist_loader();
+    test_mlp_forward_shape();
+    test_mlp_backward_runs();
     std::cout << "\nAll tests passed.\n";
     return 0;
 }
