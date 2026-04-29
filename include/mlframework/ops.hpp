@@ -4,10 +4,10 @@
 
 namespace mlf::ops {
 
-Tensor add(const Tensor& a, const Tensor& b);
-Tensor sub(const Tensor& a, const Tensor& b);
-Tensor mul(const Tensor& a, const Tensor& b);
-Tensor div(const Tensor& a, const Tensor& b);
-Tensor matmul(const Tensor& a, const Tensor& b);
+TensorPtr add(TensorPtr a, TensorPtr b);
+TensorPtr sub(TensorPtr a, TensorPtr b);
+TensorPtr mul(TensorPtr a, TensorPtr b);
+TensorPtr div(TensorPtr a, TensorPtr b);
+TensorPtr matmul(TensorPtr a, TensorPtr b);
 
 }  // namespace mlf::ops
