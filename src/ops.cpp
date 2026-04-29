@@ -137,4 +137,34 @@ TensorPtr matmul(TensorPtr a, TensorPtr b) {
     return result;
 }
 
+TensorPtr add_bias(TensorPtr a, TensorPtr b) {
+    if (a->shape.size() != 2 || b->shape.size() != 1) {
+        throw std::invalid_argument("add_bias requires a 2D tensor and a 1D bias");
+    }
+    if (a->shape[1] != b->shape[0]) {
+        throw std::invalid_argument("bias size must match a.shape[1]");
+    }
+    size_t M = a->shape[0];
+    size_t N = a->shape[1];
+    bool rg = a->requires_grad || b->requires_grad;
+    auto result = make_tensor({M, N}, rg);
+    for (size_t i = 0; i < M; i++) {
+        for (size_t j = 0; j < N; j++) {
+            result->data[i * N + j] = a->data[i * N + j] + b->data[j];
+        }
+    }
+    if (rg) {
+        result->inputs = {a, b};
+        result->backward_fn = [a, b, result, M, N]() {
+            for (size_t i = 0; i < M; i++) {
+                for (size_t j = 0; j < N; j++) {
+                    if (a->requires_grad) a->grad[i * N + j] += result->grad[i * N + j];
+                    if (b->requires_grad) b->grad[j] += result->grad[i * N + j];
+                }
+            }
+        };
+    }
+    return result;
+}
+
 }  // namespace mlf::ops

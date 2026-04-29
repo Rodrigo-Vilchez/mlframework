@@ -10,6 +10,8 @@ add_library(mlframework_core
     src/tensor.cpp
     src/ops.cpp
     src/optimizer.cpp
+    src/layer.cpp
+    src/loss.cpp
 )
 
 target_include_directories(mlframework_core PUBLIC

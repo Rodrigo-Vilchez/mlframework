@@ -1,6 +1,9 @@
 #include <cassert>
+#include <cmath>
 #include <iostream>
 
+#include "mlframework/layer.hpp"
+#include "mlframework/loss.hpp"
 #include "mlframework/ops.hpp"
 #include "mlframework/optimizer.hpp"
 #include "mlframework/tensor.hpp"
@@ -122,6 +125,69 @@ void test_sgd_converges() {
     std::cout << "[OK] SGD converges\n";
 }
 
+void test_linear_forward_shape() {
+    Linear fc(4, 3);
+    auto x = make_tensor({2, 4}, std::vector<float>(8, 1.0F));
+    auto y = fc.forward(x);
+    assert(y->shape[0] == 2);
+    assert(y->shape[1] == 3);
+    std::cout << "[OK] linear forward shape\n";
+}
+
+void test_relu() {
+    auto x = make_tensor({4}, {-2.0F, -1.0F, 0.0F, 3.0F}, true);
+    auto y = relu(x);
+    assert(y->data[0] == 0.0F);
+    assert(y->data[1] == 0.0F);
+    assert(y->data[2] == 0.0F);
+    assert(y->data[3] == 3.0F);
+    y->backward();
+    assert(x->grad[0] == 0.0F);
+    assert(x->grad[3] == 1.0F);
+    std::cout << "[OK] relu + grad\n";
+}
+
+void test_sigmoid_range() {
+    auto x = make_tensor({3}, {-10.0F, 0.0F, 10.0F});
+    auto y = sigmoid(x);
+    assert(y->data[0] < 0.01F);
+    assert(std::abs(y->data[1] - 0.5F) < 1e-6F);
+    assert(y->data[2] > 0.99F);
+    std::cout << "[OK] sigmoid range\n";
+}
+
+void test_cross_entropy_perfect_prediction() {
+    // high logits in the correct class implies loss near 0
+    auto logits = make_tensor({2, 3}, {10.0F, 0.0F, 0.0F, 0.0F, 10.0F, 0.0F}, true);
+    auto labels = make_tensor({2}, std::vector<float>{0.0F, 1.0F});
+    auto loss = cross_entropy(logits, labels);
+    assert(loss->data[0] < 0.001F);
+    std::cout << "[OK] cross_entropy perfect prediction\n";
+}
+
+void test_cross_entropy_uniform_prediction() {
+    // same logits implies loss = log(num_classes) = log(4)
+    auto logits = make_tensor({1, 4}, {1.0F, 1.0F, 1.0F, 1.0F}, true);
+    auto labels = make_tensor({1}, std::vector<float>{2.0F});
+    auto loss = cross_entropy(logits, labels);
+    float expected = std::log(4.0F);
+    assert(std::abs(loss->data[0] - expected) < 1e-5F);
+    std::cout << "[OK] cross_entropy uniform prediction\n";
+}
+
+void test_cross_entropy_backward() {
+    // gradient check: grad of logits should be (p - y) / B
+    auto logits = make_tensor({1, 3}, {1.0F, 2.0F, 3.0F}, true);
+    auto labels = make_tensor({1}, std::vector<float>{2.0F});
+    auto loss = cross_entropy(logits, labels);
+    loss->backward();
+    // correct class grad should be negative (p - 1), others positive (p - 0)
+    assert(logits->grad[2] < 0.0F);
+    assert(logits->grad[0] > 0.0F);
+    assert(logits->grad[1] > 0.0F);
+    std::cout << "[OK] cross_entropy backward\n";
+}
+
 int main() {
     test_constructor_zeros();
     test_constructor_data();
@@ -135,6 +201,12 @@ int main() {
     test_grad_add();
     test_grad_chain();
     test_sgd_converges();
+    test_linear_forward_shape();
+    test_relu();
+    test_sigmoid_range();
+    test_cross_entropy_perfect_prediction();
+    test_cross_entropy_uniform_prediction();
+    test_cross_entropy_backward();
     std::cout << "\nAll tests passed.\n";
     return 0;
 }

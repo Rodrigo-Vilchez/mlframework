@@ -70,7 +70,7 @@ void Tensor::backward() {
     if (grad.empty()) {
         grad.assign(numel(), 0.0F);
     }
-    grad[0] = 1.0F;
+    std::fill(grad.begin(), grad.end(), 1.0F);
 
     std::vector<Tensor*> topo;
     std::vector<Tensor*> visited;
