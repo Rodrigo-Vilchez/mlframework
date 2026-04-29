@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Core library
 add_library(mlframework_core
     src/tensor.cpp
+    src/ops.cpp
 )
 
 target_include_directories(mlframework_core PUBLIC
