@@ -12,6 +12,7 @@ add_library(mlframework_core
     src/optimizer.cpp
     src/layer.cpp
     src/loss.cpp
+    src/dataloader.cpp
 )
 
 target_include_directories(mlframework_core PUBLIC

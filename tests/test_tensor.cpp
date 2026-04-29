@@ -2,6 +2,7 @@
 #include <cmath>
 #include <iostream>
 
+#include "mlframework/dataloader.hpp"
 #include "mlframework/layer.hpp"
 #include "mlframework/loss.hpp"
 #include "mlframework/ops.hpp"
@@ -188,6 +189,24 @@ void test_cross_entropy_backward() {
     std::cout << "[OK] cross_entropy backward\n";
 }
 
+void test_mnist_loader() {
+    MNISTLoader loader("data/mnist/train-images-idx3-ubyte", "data/mnist/train-labels-idx1-ubyte",
+                       32);
+    assert(loader.num_samples() == 60000);
+    assert(loader.has_next());
+
+    Batch b = loader.next();
+    assert(b.images->shape[0] == 32);
+    assert(b.images->shape[1] == 784);
+    assert(b.labels->shape[0] == 32);
+
+    // pixel values normalized
+    for (size_t i = 0; i < b.images->numel(); i++) {
+        assert(b.images->data[i] >= 0.0F && b.images->data[i] <= 1.0F);
+    }
+    std::cout << "[OK] MNIST loader\n";
+}
+
 int main() {
     test_constructor_zeros();
     test_constructor_data();
@@ -207,6 +226,7 @@ int main() {
     test_cross_entropy_perfect_prediction();
     test_cross_entropy_uniform_prediction();
     test_cross_entropy_backward();
+    test_mnist_loader();
     std::cout << "\nAll tests passed.\n";
     return 0;
 }
