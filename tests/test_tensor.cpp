@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include "mlframework/ops.hpp"
+#include "mlframework/optimizer.hpp"
 #include "mlframework/tensor.hpp"
 
 using namespace mlf;
@@ -105,6 +106,22 @@ void test_grad_chain() {
     std::cout << "[OK] grad chain rule\n";
 }
 
+void test_sgd_converges() {
+    // f(x) = x^2, grad = 2x, minimum at x = 0
+    auto x = make_tensor({1}, {5.0F}, true);
+    SGD opt({x}, 0.1F);
+
+    for (int i = 0; i < 50; i++) {
+        opt.zero_grad();
+        // manually set grad = 2x (forward not needed here)
+        x->grad[0] = 2.0F * x->data[0];
+        opt.step();
+    }
+
+    assert(x->data[0] < 0.01F);
+    std::cout << "[OK] SGD converges\n";
+}
+
 int main() {
     test_constructor_zeros();
     test_constructor_data();
@@ -117,6 +134,7 @@ int main() {
     test_grad_mul();
     test_grad_add();
     test_grad_chain();
+    test_sgd_converges();
     std::cout << "\nAll tests passed.\n";
     return 0;
 }
