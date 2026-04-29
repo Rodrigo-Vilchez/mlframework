@@ -3,6 +3,7 @@
 #include <iostream>
 #include <numeric>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace mlf {
 
@@ -73,13 +74,11 @@ void Tensor::backward() {
     std::fill(grad.begin(), grad.end(), 1.0F);
 
     std::vector<Tensor*> topo;
-    std::vector<Tensor*> visited;
+    std::unordered_set<Tensor*> visited;
 
     std::function<void(Tensor*)> build_topo = [&](Tensor* node) {
-        for (Tensor* v : visited) {
-            if (v == node) return;
-        }
-        visited.push_back(node);
+        if (visited.count(node)) return;
+        visited.insert(node);
         for (auto& inp : node->inputs) {
             build_topo(inp.get());
         }

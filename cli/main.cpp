@@ -13,6 +13,7 @@ static float compute_accuracy(MLP& model, MNISTLoader& loader) {
     size_t correct = 0;
     size_t total = 0;
 
+    NoGrad ng;
     while (loader.has_next()) {
         Batch b = loader.next();
         auto logits = model.forward(b.images);

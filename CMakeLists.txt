@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+find_package(BLAS REQUIRED)
+
 # Core library
 add_library(mlframework_core
     src/tensor.cpp
@@ -19,6 +21,9 @@ add_library(mlframework_core
 target_include_directories(mlframework_core PUBLIC
     ${PROJECT_SOURCE_DIR}/include
 )
+
+# OpenBLAS
+target_link_libraries(mlframework_core PUBLIC BLAS::BLAS)
 
 # CLI
 add_executable(mlframework cli/main.cpp)

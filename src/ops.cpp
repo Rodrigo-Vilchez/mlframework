@@ -1,5 +1,7 @@
 #include "mlframework/ops.hpp"
 
+#include <cblas.h>
+
 #include <stdexcept>
 
 namespace mlf::ops {
@@ -11,7 +13,7 @@ static void check_same_shape(const TensorPtr& a, const TensorPtr& b) {
 }
 
 static bool any_requires_grad(const TensorPtr& a, const TensorPtr& b) {
-    return a->requires_grad || b->requires_grad;
+    return !no_grad_mode() && (a->requires_grad || b->requires_grad);
 }
 
 TensorPtr add(TensorPtr a, TensorPtr b) {
@@ -106,6 +108,8 @@ TensorPtr matmul(TensorPtr a, TensorPtr b) {
     }
     bool rg = any_requires_grad(a, b);
     auto result = make_tensor({M, N}, rg);
+
+    /*
     for (size_t i = 0; i < M; i++) {
         for (size_t j = 0; j < N; j++) {
             for (size_t k = 0; k < K; k++) {
@@ -113,9 +117,17 @@ TensorPtr matmul(TensorPtr a, TensorPtr b) {
             }
         }
     }
+    */
+
+    // Forward: result = A @ B
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(M), static_cast<int>(N),
+                static_cast<int>(K), 1.0F, a->data.data(), static_cast<int>(K), b->data.data(),
+                static_cast<int>(N), 0.0F, result->data.data(), static_cast<int>(N));
+
     if (rg) {
         result->inputs = {a, b};
         result->backward_fn = [a, b, result, M, K, N]() {
+            /*
             for (size_t i = 0; i < M; i++) {
                 for (size_t k = 0; k < K; k++) {
                     if (a->requires_grad) {
@@ -131,6 +143,21 @@ TensorPtr matmul(TensorPtr a, TensorPtr b) {
                         }
                     }
                 }
+            }
+            */
+            if (a->requires_grad) {
+                // grad_A = grad_C @ B^T
+                cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, static_cast<int>(M),
+                            static_cast<int>(K), static_cast<int>(N), 1.0F, result->grad.data(),
+                            static_cast<int>(N), b->data.data(), static_cast<int>(N), 1.0F,
+                            a->grad.data(), static_cast<int>(K));
+            }
+            if (b->requires_grad) {
+                // grad_B = A^T @ grad_C
+                cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, static_cast<int>(K),
+                            static_cast<int>(N), static_cast<int>(M), 1.0F, a->data.data(),
+                            static_cast<int>(K), result->grad.data(), static_cast<int>(N), 1.0F,
+                            b->grad.data(), static_cast<int>(N));
             }
         };
     }

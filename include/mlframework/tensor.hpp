@@ -14,6 +14,16 @@ TensorPtr make_tensor(std::vector<size_t> shape, bool requires_grad = false);
 TensorPtr make_tensor(std::vector<size_t> shape, std::vector<float> data,
                       bool requires_grad = false);
 
+inline bool& no_grad_mode() {
+    static bool flag = false;
+    return flag;
+}
+
+struct NoGrad {
+    NoGrad() { no_grad_mode() = true; }
+    ~NoGrad() { no_grad_mode() = false; }
+};
+
 struct Tensor {
     std::vector<size_t> shape;
     std::vector<size_t> strides;
