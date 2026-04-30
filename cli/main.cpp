@@ -71,7 +71,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Train samples : " << train_loader.num_samples() << "\n";
     std::cout << "Test  samples : " << test_loader.num_samples() << "\n\n";
 
-    MLP model(784, {128, 64}, 10, 0.3F);  // 30% dropout
+    MLP model(784, {128, 64}, 10, 0.3F, true);  // 30% dropout, batch norm activated
     // SGD opt(model.parameters(), lr);
     Adam opt(model.parameters(), lr);
 
