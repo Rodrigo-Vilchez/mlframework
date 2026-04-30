@@ -15,3 +15,6 @@ cmake_install.cmake
 # Editor
 .cache/
 compile_commands.json
+
+# MNIST dataset
+data/
