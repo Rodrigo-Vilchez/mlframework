@@ -25,10 +25,10 @@ TensorPtr add(TensorPtr a, TensorPtr b) {
     }
     if (rg) {
         result->inputs = {a, b};
-        result->backward_fn = [a, b, result]() {
-            for (size_t i = 0; i < result->numel(); i++) {
-                if (a->requires_grad) a->grad[i] += result->grad[i];
-                if (b->requires_grad) b->grad[i] += result->grad[i];
+        result->backward_fn = [a, b, r = result.get()]() {
+            for (size_t i = 0; i < r->numel(); i++) {
+                if (a->requires_grad) a->grad[i] += r->grad[i];
+                if (b->requires_grad) b->grad[i] += r->grad[i];
             }
         };
     }
@@ -44,10 +44,10 @@ TensorPtr sub(TensorPtr a, TensorPtr b) {
     }
     if (rg) {
         result->inputs = {a, b};
-        result->backward_fn = [a, b, result]() {
-            for (size_t i = 0; i < result->numel(); i++) {
-                if (a->requires_grad) a->grad[i] += result->grad[i];
-                if (b->requires_grad) b->grad[i] -= result->grad[i];
+        result->backward_fn = [a, b, r = result.get()]() {
+            for (size_t i = 0; i < r->numel(); i++) {
+                if (a->requires_grad) a->grad[i] += r->grad[i];
+                if (b->requires_grad) b->grad[i] -= r->grad[i];
             }
         };
     }
@@ -63,10 +63,10 @@ TensorPtr mul(TensorPtr a, TensorPtr b) {
     }
     if (rg) {
         result->inputs = {a, b};
-        result->backward_fn = [a, b, result]() {
-            for (size_t i = 0; i < result->numel(); i++) {
-                if (a->requires_grad) a->grad[i] += result->grad[i] * b->data[i];
-                if (b->requires_grad) b->grad[i] += result->grad[i] * a->data[i];
+        result->backward_fn = [a, b, r = result.get()]() {
+            for (size_t i = 0; i < r->numel(); i++) {
+                if (a->requires_grad) a->grad[i] += r->grad[i] * b->data[i];
+                if (b->requires_grad) b->grad[i] += r->grad[i] * a->data[i];
             }
         };
     }
@@ -85,11 +85,11 @@ TensorPtr div(TensorPtr a, TensorPtr b) {
     }
     if (rg) {
         result->inputs = {a, b};
-        result->backward_fn = [a, b, result]() {
-            for (size_t i = 0; i < result->numel(); i++) {
-                if (a->requires_grad) a->grad[i] += result->grad[i] / b->data[i];
+        result->backward_fn = [a, b, r = result.get()]() {
+            for (size_t i = 0; i < r->numel(); i++) {
+                if (a->requires_grad) a->grad[i] += r->grad[i] / b->data[i];
                 if (b->requires_grad)
-                    b->grad[i] -= result->grad[i] * a->data[i] / (b->data[i] * b->data[i]);
+                    b->grad[i] -= r->grad[i] * a->data[i] / (b->data[i] * b->data[i]);
             }
         };
     }
@@ -126,20 +126,20 @@ TensorPtr matmul(TensorPtr a, TensorPtr b) {
 
     if (rg) {
         result->inputs = {a, b};
-        result->backward_fn = [a, b, result, M, K, N]() {
+        result->backward_fn = [a, b, r = result.get(), M, K, N]() {
             /*
             for (size_t i = 0; i < M; i++) {
                 for (size_t k = 0; k < K; k++) {
                     if (a->requires_grad) {
                         float g = 0.0F;
                         for (size_t j = 0; j < N; j++) {
-                            g += result->grad[i * N + j] * b->data[k * N + j];
+                            g += r->grad[i * N + j] * b->data[k * N + j];
                         }
                         a->grad[i * K + k] += g;
                     }
                     if (b->requires_grad) {
                         for (size_t j = 0; j < N; j++) {
-                            b->grad[k * N + j] += result->grad[i * N + j] * a->data[i * K + k];
+                            b->grad[k * N + j] += r->grad[i * N + j] * a->data[i * K + k];
                         }
                     }
                 }
@@ -148,7 +148,7 @@ TensorPtr matmul(TensorPtr a, TensorPtr b) {
             if (a->requires_grad) {
                 // grad_A = grad_C @ B^T
                 cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, static_cast<int>(M),
-                            static_cast<int>(K), static_cast<int>(N), 1.0F, result->grad.data(),
+                            static_cast<int>(K), static_cast<int>(N), 1.0F, r->grad.data(),
                             static_cast<int>(N), b->data.data(), static_cast<int>(N), 1.0F,
                             a->grad.data(), static_cast<int>(K));
             }
@@ -156,7 +156,7 @@ TensorPtr matmul(TensorPtr a, TensorPtr b) {
                 // grad_B = A^T @ grad_C
                 cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, static_cast<int>(K),
                             static_cast<int>(N), static_cast<int>(M), 1.0F, a->data.data(),
-                            static_cast<int>(K), result->grad.data(), static_cast<int>(N), 1.0F,
+                            static_cast<int>(K), r->grad.data(), static_cast<int>(N), 1.0F,
                             b->grad.data(), static_cast<int>(N));
             }
         };
@@ -182,11 +182,11 @@ TensorPtr add_bias(TensorPtr a, TensorPtr b) {
     }
     if (rg) {
         result->inputs = {a, b};
-        result->backward_fn = [a, b, result, M, N]() {
+        result->backward_fn = [a, b, r = result.get(), M, N]() {
             for (size_t i = 0; i < M; i++) {
                 for (size_t j = 0; j < N; j++) {
-                    if (a->requires_grad) a->grad[i * N + j] += result->grad[i * N + j];
-                    if (b->requires_grad) b->grad[j] += result->grad[i * N + j];
+                    if (a->requires_grad) a->grad[i * N + j] += r->grad[i * N + j];
+                    if (b->requires_grad) b->grad[j] += r->grad[i * N + j];
                 }
             }
         };

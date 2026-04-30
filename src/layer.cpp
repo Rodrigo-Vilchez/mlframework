@@ -39,10 +39,9 @@ TensorPtr relu(TensorPtr x) {
     }
     if (x->requires_grad) {
         result->inputs = {x};
-        result->backward_fn = [x, result]() {
+        result->backward_fn = [x, r = result.get()]() {
             for (size_t i = 0; i < x->numel(); i++) {
-                if (x->requires_grad)
-                    x->grad[i] += result->grad[i] * (x->data[i] > 0.0F ? 1.0F : 0.0F);
+                if (x->requires_grad) x->grad[i] += r->grad[i] * (x->data[i] > 0.0F ? 1.0F : 0.0F);
             }
         };
     }
@@ -56,11 +55,11 @@ TensorPtr sigmoid(TensorPtr x) {
     }
     if (x->requires_grad) {
         result->inputs = {x};
-        result->backward_fn = [x, result]() {
+        result->backward_fn = [x, r = result.get()]() {
             for (size_t i = 0; i < x->numel(); i++) {
                 if (x->requires_grad) {
-                    float s = result->data[i];
-                    x->grad[i] += result->grad[i] * s * (1.0F - s);
+                    float s = r->data[i];
+                    x->grad[i] += r->grad[i] * s * (1.0F - s);
                 }
             }
         };
