@@ -71,7 +71,8 @@ int main(int argc, char* argv[]) {
     std::cout << "Test  samples : " << test_loader.num_samples() << "\n\n";
 
     MLP model(784, {128, 64}, 10);
-    SGD opt(model.parameters(), lr);
+    // SGD opt(model.parameters(), lr);
+    Adam opt(model.parameters(), lr);
 
     for (size_t epoch = 1; epoch <= epochs; epoch++) {
         train_loader.reset();
@@ -96,11 +97,13 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        float train_acc = compute_accuracy(model, train_loader);
+        // float train_acc = compute_accuracy(model, train_loader);
         float test_acc = compute_accuracy(model, test_loader);
 
-        std::cout << "Epoch " << epoch << "  loss " << epoch_loss / static_cast<float>(steps)
-                  << "  train_acc " << train_acc << "  test_acc " << test_acc << "\n";
+        std::cout << "Epoch " << epoch << "  loss "
+                  << epoch_loss / static_cast<float>(steps)
+                  /*<< "  train_acc " << train_acc*/
+                  << "  test_acc " << test_acc << "\n";
     }
 
     return 0;
