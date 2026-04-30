@@ -71,4 +71,21 @@ void Adam::zero_grad() {
     }
 }
 
+CosineAnnealingWR::CosineAnnealingWR(float lr_max, float lr_min, size_t T0, float T_mult)
+    : lr_max_(lr_max), lr_min_(lr_min), T0_(T0), T_mult_(T_mult), T_cur_(T0) {}
+
+float CosineAnnealingWR::get_lr() const {
+    float progress = static_cast<float>(t_cur_) / static_cast<float>(T_cur_);
+    return lr_min_ +
+           0.5F * (lr_max_ - lr_min_) * (1.0F + std::cos(static_cast<float>(M_PI) * progress));
+}
+
+void CosineAnnealingWR::step() {
+    t_cur_++;
+    if (t_cur_ >= T_cur_) {
+        t_cur_ = 0;
+        T_cur_ = static_cast<size_t>(static_cast<float>(T_cur_) * T_mult_);
+    }
+}
+
 }  // namespace mlf

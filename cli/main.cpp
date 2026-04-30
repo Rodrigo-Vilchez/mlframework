@@ -74,8 +74,14 @@ int main(int argc, char* argv[]) {
     MLP model(784, {128, 64}, 10, 0.3F, true);  // 30% dropout, batch norm activated
     // SGD opt(model.parameters(), lr);
     Adam opt(model.parameters(), lr);
+    CosineAnnealingWR scheduler(lr, 1e-5F, 5, 2.0F);  // T0=5, doubles each restart
+
+    std::cout << "lr_max=" << lr << "  lr_min=1e-5  T0=5  T_mult=2\n\n";
 
     for (size_t epoch = 1; epoch <= epochs; epoch++) {
+        float current_lr = scheduler.get_lr();
+        opt.set_lr(current_lr);
+
         train_loader.reset();
         float epoch_loss = 0.0F;
         size_t steps = 0;
@@ -101,8 +107,11 @@ int main(int argc, char* argv[]) {
         float train_acc = compute_accuracy(model, train_loader);
         float test_acc = compute_accuracy(model, test_loader);
 
-        std::cout << "Epoch " << epoch << "  loss " << epoch_loss / static_cast<float>(steps)
-                  << "  train_acc " << train_acc << "  test_acc " << test_acc << "\n";
+        std::cout << "Epoch " << epoch << "  lr " << current_lr << "  loss "
+                  << epoch_loss / static_cast<float>(steps) << "  train_acc " << train_acc
+                  << "  test_acc " << test_acc << "\n";
+
+        scheduler.step();
     }
 
     return 0;
