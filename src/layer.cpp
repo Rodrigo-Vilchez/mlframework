@@ -67,4 +67,30 @@ TensorPtr sigmoid(TensorPtr x) {
     return result;
 }
 
+TensorPtr dropout(TensorPtr x, float p) {
+    if (!training_mode() || p == 0.0F) return x;
+
+    static std::mt19937 rng(std::random_device{}());
+    std::bernoulli_distribution dist(1.0F - p);
+
+    auto result = make_tensor(x->shape, x->requires_grad);
+    std::vector<float> mask(x->numel());
+
+    float scale = 1.0F / (1.0F - p);  // inverted dropout scaling
+    for (size_t i = 0; i < x->numel(); i++) {
+        mask[i] = dist(rng) ? scale : 0.0F;
+        result->data[i] = x->data[i] * mask[i];
+    }
+
+    if (x->requires_grad) {
+        result->inputs = {x};
+        result->backward_fn = [x, r = result.get(), mask]() {
+            for (size_t i = 0; i < x->numel(); i++) {
+                if (x->requires_grad) x->grad[i] += r->grad[i] * mask[i];
+            }
+        };
+    }
+    return result;
+}
+
 }  // namespace mlf

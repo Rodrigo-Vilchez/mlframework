@@ -1,8 +1,11 @@
 #include "mlframework/mlp.hpp"
 
+#include "mlframework/layer.hpp"
+
 namespace mlf {
 
-MLP::MLP(size_t input_size, std::vector<size_t> hidden_sizes, size_t output_size) {
+MLP::MLP(size_t input_size, std::vector<size_t> hidden_sizes, size_t output_size, float dropout_p)
+    : dropout_p_(dropout_p) {
     std::vector<size_t> sizes;
     sizes.push_back(input_size);
     for (size_t h : hidden_sizes) sizes.push_back(h);
@@ -20,6 +23,7 @@ TensorPtr MLP::forward(TensorPtr x) {
         // ReLU on all layers except the last
         if (i + 1 < layers_.size()) {
             out = relu(out);
+            out = dropout(out, dropout_p_);
         }
     }
     return out;

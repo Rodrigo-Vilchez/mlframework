@@ -13,6 +13,7 @@ static float compute_accuracy(MLP& model, MNISTLoader& loader) {
     size_t correct = 0;
     size_t total = 0;
 
+    EvalMode eval;  // deactivates dropout
     NoGrad ng;
     while (loader.has_next()) {
         Batch b = loader.next();
@@ -34,7 +35,7 @@ static float compute_accuracy(MLP& model, MNISTLoader& loader) {
             total++;
         }
     }
-
+    TrainMode train;  // restores training mode
     return static_cast<float>(correct) / static_cast<float>(total);
 }
 
@@ -70,7 +71,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Train samples : " << train_loader.num_samples() << "\n";
     std::cout << "Test  samples : " << test_loader.num_samples() << "\n\n";
 
-    MLP model(784, {128, 64}, 10);
+    MLP model(784, {128, 64}, 10, 0.3F);  // 30% dropout
     // SGD opt(model.parameters(), lr);
     Adam opt(model.parameters(), lr);
 
@@ -97,13 +98,11 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // float train_acc = compute_accuracy(model, train_loader);
+        float train_acc = compute_accuracy(model, train_loader);
         float test_acc = compute_accuracy(model, test_loader);
 
-        std::cout << "Epoch " << epoch << "  loss "
-                  << epoch_loss / static_cast<float>(steps)
-                  /*<< "  train_acc " << train_acc*/
-                  << "  test_acc " << test_acc << "\n";
+        std::cout << "Epoch " << epoch << "  loss " << epoch_loss / static_cast<float>(steps)
+                  << "  train_acc " << train_acc << "  test_acc " << test_acc << "\n";
     }
 
     return 0;
