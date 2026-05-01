@@ -203,4 +203,131 @@ TensorPtr BatchNorm1d::forward(TensorPtr x) {
 
 std::vector<TensorPtr> BatchNorm1d::parameters() const { return {gamma_, beta_}; }
 
+Conv2d::Conv2d(size_t in_channels, size_t out_channels, size_t kernel_size, size_t stride,
+               size_t padding)
+    : in_channels_(in_channels),
+      out_channels_(out_channels),
+      kernel_size_(kernel_size),
+      stride_(stride),
+      padding_(padding) {
+    std::mt19937 rng(42);
+    float bound = 1.0F / std::sqrt(static_cast<float>(in_channels * kernel_size * kernel_size));
+    std::uniform_real_distribution<float> dist(-bound, bound);
+
+    size_t w_size = out_channels * in_channels * kernel_size * kernel_size;
+    std::vector<float> w_data(w_size);
+    for (auto& v : w_data) v = dist(rng);
+
+    weight_ = make_tensor({out_channels, in_channels, kernel_size, kernel_size}, w_data, true);
+    bias_ = make_tensor({out_channels}, std::vector<float>(out_channels, 0.0F), true);
+}
+
+TensorPtr Conv2d::forward(TensorPtr x) {
+    if (x->shape.size() != 4) {
+        throw std::invalid_argument("Conv2d::forward expects {N, C, H, W}");
+    }
+    size_t N = x->shape[0];
+    size_t C = x->shape[1];
+    size_t H = x->shape[2];
+    size_t W = x->shape[3];
+    size_t K = kernel_size_;
+    size_t F = out_channels_;
+    size_t P = padding_;
+    size_t S = stride_;
+    size_t OH = (H + 2 * P - K) / S + 1;
+    size_t OW = (W + 2 * P - K) / S + 1;
+
+    bool rg = x->requires_grad || weight_->requires_grad;
+    auto result = make_tensor({N, F, OH, OW}, rg);
+
+    // forward pass — direct convolution
+    for (size_t n = 0; n < N; n++) {
+        for (size_t f = 0; f < F; f++) {
+            for (size_t i = 0; i < OH; i++) {
+                for (size_t j = 0; j < OW; j++) {
+                    float sum = bias_->data[f];
+                    for (size_t c = 0; c < C; c++) {
+                        for (size_t ki = 0; ki < K; ki++) {
+                            for (size_t kj = 0; kj < K; kj++) {
+                                long ih = static_cast<long>(i * S + ki) - static_cast<long>(P);
+                                long iw = static_cast<long>(j * S + kj) - static_cast<long>(P);
+                                if (ih < 0 || iw < 0 || ih >= static_cast<long>(H) ||
+                                    iw >= static_cast<long>(W))
+                                    continue;
+                                size_t x_idx = n * (C * H * W) + c * (H * W) +
+                                               static_cast<size_t>(ih) * W +
+                                               static_cast<size_t>(iw);
+                                size_t w_idx = f * (C * K * K) + c * (K * K) + ki * K + kj;
+                                sum += x->data[x_idx] * weight_->data[w_idx];
+                            }
+                        }
+                    }
+                    result->data[n * (F * OH * OW) + f * (OH * OW) + i * OW + j] = sum;
+                }
+            }
+        }
+    }
+
+    if (rg) {
+        result->inputs = {x, weight_, bias_};
+        result->backward_fn = [x, w = weight_.get(), b = bias_.get(), r = result.get(), N, C, H, W,
+                               F, K, OH, OW, P, S]() {
+            for (size_t n = 0; n < N; n++) {
+                for (size_t f = 0; f < F; f++) {
+                    for (size_t i = 0; i < OH; i++) {
+                        for (size_t j = 0; j < OW; j++) {
+                            float g = r->grad[n * (F * OH * OW) + f * (OH * OW) + i * OW + j];
+
+                            // grad_bias
+                            if (b->requires_grad) b->grad[f] += g;
+
+                            for (size_t c = 0; c < C; c++) {
+                                for (size_t ki = 0; ki < K; ki++) {
+                                    for (size_t kj = 0; kj < K; kj++) {
+                                        long ih =
+                                            static_cast<long>(i * S + ki) - static_cast<long>(P);
+                                        long iw =
+                                            static_cast<long>(j * S + kj) - static_cast<long>(P);
+                                        if (ih < 0 || iw < 0 || ih >= static_cast<long>(H) ||
+                                            iw >= static_cast<long>(W))
+                                            continue;
+                                        size_t x_idx = n * (C * H * W) + c * (H * W) +
+                                                       static_cast<size_t>(ih) * W +
+                                                       static_cast<size_t>(iw);
+                                        size_t w_idx = f * (C * K * K) + c * (K * K) + ki * K + kj;
+                                        // grad_weight
+                                        if (w->requires_grad) w->grad[w_idx] += g * x->data[x_idx];
+                                        // grad_input
+                                        if (x->requires_grad) x->grad[x_idx] += g * w->data[w_idx];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+    return result;
+}
+
+std::vector<TensorPtr> Conv2d::parameters() { return {weight_, bias_}; }
+
+TensorPtr flatten(TensorPtr x) {
+    size_t N = x->shape[0];
+    size_t rest = x->numel() / N;
+    auto result = make_tensor({N, rest}, x->requires_grad);
+    result->data = x->data;
+
+    if (x->requires_grad) {
+        result->inputs = {x};
+        result->backward_fn = [x, r = result.get()]() {
+            for (size_t i = 0; i < x->numel(); i++) {
+                x->grad[i] += r->grad[i];
+            }
+        };
+    }
+    return result;
+}
+
 }  // namespace mlf

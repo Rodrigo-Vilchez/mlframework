@@ -56,4 +56,20 @@ class BatchNorm1d {
     std::vector<float> running_var_;
 };
 
+class Conv2d {
+   public:
+    Conv2d(size_t in_channels, size_t out_channels, size_t kernel_size, size_t stride = 1,
+           size_t padding = 0);
+
+    TensorPtr forward(TensorPtr x);  // x: {N, C, H, W}
+    std::vector<TensorPtr> parameters();
+
+   private:
+    size_t in_channels_, out_channels_, kernel_size_, stride_, padding_;
+    TensorPtr weight_;  // {out_channels, in_channels, K, K}
+    TensorPtr bias_;    // {out_channels}
+};
+
+TensorPtr flatten(TensorPtr x);  // {N, ...} -> {N, numel/N}
+
 }  // namespace mlf

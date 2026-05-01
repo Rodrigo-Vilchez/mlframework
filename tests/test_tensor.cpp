@@ -238,6 +238,37 @@ void test_mlp_backward_runs() {
     std::cout << "[OK] MLP backward runs\n";
 }
 
+void test_conv2d_forward_shape() {
+    Conv2d conv(1, 8, 3, 1, 1);  // in=1, out=8, K=3, S=1, P=1
+    auto x = make_tensor({2, 1, 8, 8}, std::vector<float>(2 * 64, 0.5F));
+    auto y = conv.forward(x);
+    assert(y->shape[0] == 2);
+    assert(y->shape[1] == 8);
+    assert(y->shape[2] == 8);  // padding=1 preserves spatial size
+    assert(y->shape[3] == 8);
+    std::cout << "[OK] conv2d forward shape with padding\n";
+}
+
+void test_conv2d_backward_runs() {
+    Conv2d conv(1, 4, 3, 1, 1);
+    auto x = make_tensor({1, 1, 4, 4}, std::vector<float>(16, 1.0F), true);
+    auto labels = make_tensor({1}, std::vector<float>{0.0F});
+    auto y = conv.forward(x);
+    auto flat = flatten(y);
+    // reduce to scalar via sum for simple backward test
+    auto w = make_tensor({flat->shape[1], 1}, std::vector<float>(flat->shape[1], 1.0F), false);
+    auto out = ops::matmul(flat, w);
+    out->backward();
+    bool any_nonzero = false;
+    for (float g : x->grad)
+        if (g != 0.0F) {
+            any_nonzero = true;
+            break;
+        }
+    assert(any_nonzero);
+    std::cout << "[OK] conv2d backward runs\n";
+}
+
 int main() {
     test_constructor_zeros();
     test_constructor_data();
@@ -260,6 +291,8 @@ int main() {
     test_mnist_loader();
     test_mlp_forward_shape();
     test_mlp_backward_runs();
+    test_conv2d_forward_shape();
+    test_conv2d_backward_runs();
     std::cout << "\nAll tests passed.\n";
     return 0;
 }
