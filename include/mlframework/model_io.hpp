@@ -2,7 +2,6 @@
 
 #include <string>
 
-#include "mlframework/cnn.hpp"
 #include "mlframework/mlp.hpp"
 
 namespace mlf {
@@ -17,20 +16,5 @@ struct ModelConfig {
 
 void save_model(const MLP& model, const ModelConfig& config, const std::string& path);
 ModelConfig load_model(MLP& model, const std::string& path);
-
-// Variant that wraps either MLP or CNN uniformly
-struct Model {
-    enum class Type { MLP, CNN };
-    Type type;
-
-    std::unique_ptr<MLP> mlp;
-    std::unique_ptr<CNN> cnn;
-
-    TensorPtr forward(TensorPtr x) { return type == Type::MLP ? mlp->forward(x) : cnn->forward(x); }
-
-    std::vector<TensorPtr> parameters() const {
-        return type == Type::MLP ? mlp->parameters() : cnn->parameters();
-    }
-};
 
 }  // namespace mlf

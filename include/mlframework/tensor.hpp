@@ -52,4 +52,6 @@ struct Tensor {
     size_t flat_index(const std::vector<size_t>& indices) const;
 };
 
+TensorPtr reshape(TensorPtr x, std::vector<size_t> new_shape);
+
 }  // namespace mlf

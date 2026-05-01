@@ -1,5 +1,7 @@
 #include "mlframework/layer.hpp"
 
+#include <cblas.h>
+
 #include <cmath>
 #include <random>
 #include <stdexcept>
@@ -237,33 +239,50 @@ TensorPtr Conv2d::forward(TensorPtr x) {
     size_t OH = (H + 2 * P - K) / S + 1;
     size_t OW = (W + 2 * P - K) / S + 1;
 
-    bool rg = x->requires_grad || weight_->requires_grad;
-    auto result = make_tensor({N, F, OH, OW}, rg);
+    // im2col: input → col {N, C*K*K, OH*OW}
+    size_t col_rows = C * K * K;
+    size_t col_cols = OH * OW;
+    std::vector<float> col(N * col_rows * col_cols, 0.0F);
 
-    // forward pass — direct convolution
     for (size_t n = 0; n < N; n++) {
-        for (size_t f = 0; f < F; f++) {
-            for (size_t i = 0; i < OH; i++) {
-                for (size_t j = 0; j < OW; j++) {
-                    float sum = bias_->data[f];
-                    for (size_t c = 0; c < C; c++) {
-                        for (size_t ki = 0; ki < K; ki++) {
-                            for (size_t kj = 0; kj < K; kj++) {
-                                long ih = static_cast<long>(i * S + ki) - static_cast<long>(P);
-                                long iw = static_cast<long>(j * S + kj) - static_cast<long>(P);
-                                if (ih < 0 || iw < 0 || ih >= static_cast<long>(H) ||
-                                    iw >= static_cast<long>(W))
-                                    continue;
-                                size_t x_idx = n * (C * H * W) + c * (H * W) +
-                                               static_cast<size_t>(ih) * W +
-                                               static_cast<size_t>(iw);
-                                size_t w_idx = f * (C * K * K) + c * (K * K) + ki * K + kj;
-                                sum += x->data[x_idx] * weight_->data[w_idx];
+        for (size_t c = 0; c < C; c++) {
+            for (size_t ki = 0; ki < K; ki++) {
+                for (size_t kj = 0; kj < K; kj++) {
+                    size_t row = c * K * K + ki * K + kj;
+                    for (size_t i = 0; i < OH; i++) {
+                        for (size_t j = 0; j < OW; j++) {
+                            long ih = static_cast<long>(i * S + ki) - static_cast<long>(P);
+                            long iw = static_cast<long>(j * S + kj) - static_cast<long>(P);
+                            size_t col_idx =
+                                n * (col_rows * col_cols) + row * col_cols + i * OW + j;
+                            if (ih >= 0 && iw >= 0 && ih < static_cast<long>(H) &&
+                                iw < static_cast<long>(W)) {
+                                col[col_idx] =
+                                    x->data[n * (C * H * W) + c * (H * W) +
+                                            static_cast<size_t>(ih) * W + static_cast<size_t>(iw)];
                             }
                         }
                     }
-                    result->data[n * (F * OH * OW) + f * (OH * OW) + i * OW + j] = sum;
                 }
+            }
+        }
+    }
+
+    bool rg = x->requires_grad || weight_->requires_grad;
+    auto result = make_tensor({N, F, OH, OW}, rg);
+
+    // output = weight {F, C*K*K} @ col {C*K*K, OH*OW} + bias
+    // one sgemm per image
+    for (size_t n = 0; n < N; n++) {
+        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(F),
+                    static_cast<int>(col_cols), static_cast<int>(col_rows), 1.0F,
+                    weight_->data.data(), static_cast<int>(col_rows),
+                    col.data() + n * col_rows * col_cols, static_cast<int>(col_cols), 0.0F,
+                    result->data.data() + n * F * col_cols, static_cast<int>(col_cols));
+        // add bias
+        for (size_t f = 0; f < F; f++) {
+            for (size_t k = 0; k < col_cols; k++) {
+                result->data[n * (F * col_cols) + f * col_cols + k] += bias_->data[f];
             }
         }
     }
@@ -271,19 +290,73 @@ TensorPtr Conv2d::forward(TensorPtr x) {
     if (rg) {
         result->inputs = {x, weight_, bias_};
         result->backward_fn = [x, w = weight_.get(), b = bias_.get(), r = result.get(), N, C, H, W,
-                               F, K, OH, OW, P, S]() {
+                               F, K, OH, OW, P, S, col_rows, col_cols]() {
+            // gradient checkpointing: recompute col instead of capturing it
+            std::vector<float> col(N * col_rows * col_cols, 0.0F);
             for (size_t n = 0; n < N; n++) {
-                for (size_t f = 0; f < F; f++) {
-                    for (size_t i = 0; i < OH; i++) {
-                        for (size_t j = 0; j < OW; j++) {
-                            float g = r->grad[n * (F * OH * OW) + f * (OH * OW) + i * OW + j];
+                for (size_t c = 0; c < C; c++) {
+                    for (size_t ki = 0; ki < K; ki++) {
+                        for (size_t kj = 0; kj < K; kj++) {
+                            size_t row = c * K * K + ki * K + kj;
+                            for (size_t i = 0; i < OH; i++) {
+                                for (size_t j = 0; j < OW; j++) {
+                                    long ih = static_cast<long>(i * S + ki) - static_cast<long>(P);
+                                    long iw = static_cast<long>(j * S + kj) - static_cast<long>(P);
+                                    size_t col_idx =
+                                        n * (col_rows * col_cols) + row * col_cols + i * OW + j;
+                                    if (ih >= 0 && iw >= 0 && ih < static_cast<long>(H) &&
+                                        iw < static_cast<long>(W)) {
+                                        col[col_idx] = x->data[n * (C * H * W) + c * (H * W) +
+                                                               static_cast<size_t>(ih) * W +
+                                                               static_cast<size_t>(iw)];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
-                            // grad_bias
-                            if (b->requires_grad) b->grad[f] += g;
+            // grad_bias
+            if (b->requires_grad) {
+                for (size_t n = 0; n < N; n++) {
+                    for (size_t f = 0; f < F; f++) {
+                        for (size_t k = 0; k < col_cols; k++) {
+                            b->grad[f] += r->grad[n * (F * col_cols) + f * col_cols + k];
+                        }
+                    }
+                }
+            }
 
-                            for (size_t c = 0; c < C; c++) {
-                                for (size_t ki = 0; ki < K; ki++) {
-                                    for (size_t kj = 0; kj < K; kj++) {
+            for (size_t n = 0; n < N; n++) {
+                const float* grad_out = r->grad.data() + n * F * col_cols;
+                const float* col_n = col.data() + n * col_rows * col_cols;
+
+                // grad_weight += grad_out {F, col_cols} @ col^T {col_cols, col_rows}
+                if (w->requires_grad) {
+                    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, static_cast<int>(F),
+                                static_cast<int>(col_rows), static_cast<int>(col_cols), 1.0F,
+                                grad_out, static_cast<int>(col_cols), col_n,
+                                static_cast<int>(col_cols), 1.0F, w->grad.data(),
+                                static_cast<int>(col_rows));
+                }
+
+                // grad_col = weight^T @ grad_out, then col2im → grad_input
+                if (x->requires_grad) {
+                    std::vector<float> grad_col(col_rows * col_cols, 0.0F);
+                    cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, static_cast<int>(col_rows),
+                                static_cast<int>(col_cols), static_cast<int>(F), 1.0F,
+                                w->data.data(), static_cast<int>(col_rows), grad_out,
+                                static_cast<int>(col_cols), 0.0F, grad_col.data(),
+                                static_cast<int>(col_cols));
+
+                    // col2im
+                    for (size_t c = 0; c < C; c++) {
+                        for (size_t ki = 0; ki < K; ki++) {
+                            for (size_t kj = 0; kj < K; kj++) {
+                                size_t row = c * K * K + ki * K + kj;
+                                for (size_t i = 0; i < OH; i++) {
+                                    for (size_t j = 0; j < OW; j++) {
                                         long ih =
                                             static_cast<long>(i * S + ki) - static_cast<long>(P);
                                         long iw =
@@ -291,14 +364,10 @@ TensorPtr Conv2d::forward(TensorPtr x) {
                                         if (ih < 0 || iw < 0 || ih >= static_cast<long>(H) ||
                                             iw >= static_cast<long>(W))
                                             continue;
-                                        size_t x_idx = n * (C * H * W) + c * (H * W) +
-                                                       static_cast<size_t>(ih) * W +
-                                                       static_cast<size_t>(iw);
-                                        size_t w_idx = f * (C * K * K) + c * (K * K) + ki * K + kj;
-                                        // grad_weight
-                                        if (w->requires_grad) w->grad[w_idx] += g * x->data[x_idx];
-                                        // grad_input
-                                        if (x->requires_grad) x->grad[x_idx] += g * w->data[w_idx];
+                                        x->grad[n * (C * H * W) + c * (H * W) +
+                                                static_cast<size_t>(ih) * W +
+                                                static_cast<size_t>(iw)] +=
+                                            grad_col[row * col_cols + i * OW + j];
                                     }
                                 }
                             }
@@ -355,7 +424,7 @@ TensorPtr MaxPool2d::forward(TensorPtr x) {
         for (size_t c = 0; c < C; c++) {
             for (size_t i = 0; i < OH; i++) {
                 for (size_t j = 0; j < OW; j++) {
-                    float max_val = -std::numeric_limits<float>::infinity();
+                    float max_val = -std::numeric_limits<float>::max();
                     size_t max_idx = 0;
 
                     for (size_t ki = 0; ki < K; ki++) {

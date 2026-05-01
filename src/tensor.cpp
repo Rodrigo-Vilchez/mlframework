@@ -108,4 +108,24 @@ void Tensor::print() const {
     std::cout << "])\n";
 }
 
+TensorPtr reshape(TensorPtr x, std::vector<size_t> new_shape) {
+    size_t new_numel = 1;
+    for (size_t d : new_shape) new_numel *= d;
+    if (new_numel != x->numel()) {
+        throw std::invalid_argument("reshape: element count mismatch");
+    }
+    auto result = make_tensor(new_shape, x->requires_grad);
+    result->data = x->data;
+
+    if (x->requires_grad) {
+        result->inputs = {x};
+        result->backward_fn = [x, r = result.get()]() {
+            for (size_t i = 0; i < x->numel(); i++) {
+                x->grad[i] += r->grad[i];
+            }
+        };
+    }
+    return result;
+}
+
 }  // namespace mlf

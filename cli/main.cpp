@@ -1,15 +1,42 @@
 #include <iostream>
+#include <memory>
 #include <string>
 
+#include "mlframework/cnn.hpp"
 #include "mlframework/dataloader.hpp"
 #include "mlframework/loss.hpp"
 #include "mlframework/mlp.hpp"
 #include "mlframework/model_io.hpp"
 #include "mlframework/optimizer.hpp"
+#include "mlframework/tensor.hpp"
 
 using namespace mlf;
 
-static float compute_accuracy(MLP& model, MNISTLoader& loader) {
+// --- uniform model interface ---
+
+struct Model {
+    enum class Type { MLP, CNN };
+    Type type;
+    std::unique_ptr<MLP> mlp;
+    std::unique_ptr<CNN> cnn;
+
+    TensorPtr forward(TensorPtr x) { return type == Type::MLP ? mlp->forward(x) : cnn->forward(x); }
+    std::vector<TensorPtr> parameters() const {
+        return type == Type::MLP ? mlp->parameters() : cnn->parameters();
+    }
+};
+
+// --- helpers ---
+
+static TensorPtr prepare_input(TensorPtr images, Model::Type type) {
+    if (type == Model::Type::CNN) {
+        size_t N = images->shape[0];
+        return reshape(images, {N, 1, 28, 28});
+    }
+    return images;
+}
+
+static float compute_accuracy(Model& model, MNISTLoader& loader) {
     loader.reset();
     size_t correct = 0;
     size_t total = 0;
@@ -18,8 +45,8 @@ static float compute_accuracy(MLP& model, MNISTLoader& loader) {
     NoGrad ng;
     while (loader.has_next()) {
         Batch b = loader.next();
-        auto logits = model.forward(b.images);
-
+        auto input = prepare_input(b.images, model.type);
+        auto logits = model.forward(input);
         size_t B = logits->shape[0];
         size_t C = logits->shape[1];
 
@@ -41,16 +68,19 @@ static float compute_accuracy(MLP& model, MNISTLoader& loader) {
 }
 
 // TODO(#1): remove warm-up once BatchNorm running stats are persisted
-static void warmup_batchnorm(MLP& model, MNISTLoader& loader) {
+static void warmup_batchnorm(Model& model, MNISTLoader& loader) {
     std::cout << "Running warm-up pass to reconstruct BatchNorm stats...\n";
     loader.reset();
     NoGrad ng;
     while (loader.has_next()) {
         Batch b = loader.next();
-        model.forward(b.images);
+        auto input = prepare_input(b.images, model.type);
+        model.forward(input);
     }
     std::cout << "Warm-up done.\n";
 }
+
+// --- main ---
 
 int main(int argc, char* argv[]) {
     std::string data_dir = "data/mnist";
@@ -82,16 +112,21 @@ int main(int argc, char* argv[]) {
         if (arg == "--load" && i + 1 < argc) {
             load_path = (argv[++i]);
         }
-        if (arg == "--eval-only") {
-            eval_only = true;
-        }
         if (arg == "--model" && i + 1 < argc) {
             model_type = argv[++i];
+        }
+        if (arg == "--eval-only") {
+            eval_only = true;
         }
     }
 
     if (eval_only && load_path.empty()) {
         std::cerr << "Error: --eval-only requires --load\n";
+        return 1;
+    }
+
+    if (model_type != "mlp" && model_type != "cnn") {
+        std::cerr << "Error: --model must be 'mlp' or 'cnn'\n";
         return 1;
     }
 
@@ -105,12 +140,26 @@ int main(int argc, char* argv[]) {
     std::cout << "Train samples : " << train_loader.num_samples() << "\n";
     std::cout << "Test  samples : " << test_loader.num_samples() << "\n\n";
 
-    // default config - overwritten by --load
-    ModelConfig cfg{784, {128, 64}, 10, 0.3F, true};  // 30% dropout, batch norm activated
-    MLP model(cfg.input_size, cfg.hidden_sizes, cfg.output_size, cfg.dropout_p, cfg.use_batchnorm);
+    // build model
+    Model model;
+    if (model_type == "cnn") {
+        model.type = Model::Type::CNN;
+        model.cnn = std::make_unique<CNN>(0.3F);
+        std::cout << "Model: CNN (conv1→conv2→fc1→fc2)\n";
+    } else {
+        model.type = Model::Type::MLP;
+        model.mlp = std::make_unique<MLP>(784, std::vector<size_t>{128, 64}, 10, 0.3F, true);
+        std::cout << "Model: MLP (784→128→64→10)\n";
+    }
 
     if (!load_path.empty()) {
-        cfg = load_model(model, load_path);
+        // load only supported for MLP for now
+        if (model.type != Model::Type::MLP) {
+            std::cerr << "Error: --load currently only supported for --model mlp\n";
+            return 1;
+        }
+        ModelConfig cfg;
+        cfg = load_model(*model.mlp, load_path);
         warmup_batchnorm(model, train_loader);
     }
 
@@ -138,9 +187,10 @@ int main(int argc, char* argv[]) {
 
         while (train_loader.has_next()) {
             Batch b = train_loader.next();
+            auto input = prepare_input(b.images, model.type);
 
             opt.zero_grad();
-            auto logits = model.forward(b.images);
+            auto logits = model.forward(input);
             auto loss = cross_entropy(logits, b.labels);
             loss->backward();
             opt.step();
@@ -165,14 +215,17 @@ int main(int argc, char* argv[]) {
     }
 
     if (!save_path.empty()) {
-        // ensure directory exists
-        size_t slash = save_path.rfind('/');
-        if (slash != std::string::npos) {
-            std::string dir = save_path.substr(0, slash);
-            std::string cmd = "mkdir -p " + dir;
-            std::system(cmd.c_str());
+        if (model.type != Model::Type::MLP) {
+            std::cerr << "Warning: --save currently only supported for --model mlp\n";
+        } else {
+            size_t slash = save_path.rfind('/');
+            if (slash != std::string::npos) {
+                std::string cmd = "mkdir -p " + save_path.substr(0, slash);
+                std::system(cmd.c_str());
+            }
+            ModelConfig cfg{784, {128, 64}, 10, 0.3F, true};
+            save_model(*model.mlp, cfg, save_path);
         }
-        save_model(model, cfg, save_path);
     }
 
     return 0;
