@@ -24,7 +24,7 @@ class Linear {
     Linear(size_t in_features, size_t out_features);
 
     TensorPtr forward(TensorPtr x);
-    std::vector<TensorPtr> parameters();
+    std::vector<TensorPtr> parameters() const;
 
    private:
     TensorPtr weight_;
@@ -41,7 +41,7 @@ class BatchNorm1d {
     explicit BatchNorm1d(size_t num_features, float epsilon = 1e-5F, float momentum = 0.1F);
 
     TensorPtr forward(TensorPtr x);
-    std::vector<TensorPtr> parameters();
+    std::vector<TensorPtr> parameters() const;
 
    private:
     size_t num_features_;

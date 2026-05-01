@@ -37,7 +37,7 @@ TensorPtr MLP::forward(TensorPtr x) {
     return out;
 }
 
-std::vector<TensorPtr> MLP::parameters() {
+std::vector<TensorPtr> MLP::parameters() const {
     std::vector<TensorPtr> params;
     for (auto& layer : layers_) {
         for (auto& p : layer.parameters()) {

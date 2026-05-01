@@ -4,6 +4,7 @@
 #include "mlframework/dataloader.hpp"
 #include "mlframework/loss.hpp"
 #include "mlframework/mlp.hpp"
+#include "mlframework/model_io.hpp"
 #include "mlframework/optimizer.hpp"
 
 using namespace mlf;
@@ -39,11 +40,26 @@ static float compute_accuracy(MLP& model, MNISTLoader& loader) {
     return static_cast<float>(correct) / static_cast<float>(total);
 }
 
+// TODO(#1): remove warm-up once BatchNorm running stats are persisted
+static void warmup_batchnorm(MLP& model, MNISTLoader& loader) {
+    std::cout << "Running warm-up pass to reconstruct BatchNorm stats...\n";
+    loader.reset();
+    NoGrad ng;
+    while (loader.has_next()) {
+        Batch b = loader.next();
+        model.forward(b.images);
+    }
+    std::cout << "Warm-up done.\n";
+}
+
 int main(int argc, char* argv[]) {
     std::string data_dir = "data/mnist";
     size_t epochs = 5;
     size_t batch_size = 64;
-    float lr = 0.01F;
+    float lr = 0.001F;
+    std::string save_path;
+    std::string load_path;
+    bool eval_only = false;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -59,6 +75,20 @@ int main(int argc, char* argv[]) {
         if (arg == "--lr" && i + 1 < argc) {
             lr = std::stof(argv[++i]);
         }
+        if (arg == "--save" && i + 1 < argc) {
+            save_path = (argv[++i]);
+        }
+        if (arg == "--load" && i + 1 < argc) {
+            load_path = (argv[++i]);
+        }
+        if (arg == "--eval-only") {
+            eval_only = true;
+        }
+    }
+
+    if (eval_only && load_path.empty()) {
+        std::cerr << "Error: --eval-only requires --load\n";
+        return 1;
     }
 
     std::cout << "Loading MNIST from " << data_dir << "...\n";
@@ -71,7 +101,23 @@ int main(int argc, char* argv[]) {
     std::cout << "Train samples : " << train_loader.num_samples() << "\n";
     std::cout << "Test  samples : " << test_loader.num_samples() << "\n\n";
 
-    MLP model(784, {128, 64}, 10, 0.3F, true);  // 30% dropout, batch norm activated
+    // default config - overwritten by --load
+    ModelConfig cfg{784, {128, 64}, 10, 0.3F, true};  // 30% dropout, batch norm activated
+    MLP model(cfg.input_size, cfg.hidden_sizes, cfg.output_size, cfg.dropout_p, cfg.use_batchnorm);
+
+    if (!load_path.empty()) {
+        cfg = load_model(model, load_path);
+        warmup_batchnorm(model, train_loader);
+    }
+
+    if (eval_only) {
+        float acc = compute_accuracy(model, test_loader);
+        size_t correct = static_cast<size_t>(acc * test_loader.num_samples());
+        std::cout << "Test accuracy: " << acc << " (" << correct << " / "
+                  << test_loader.num_samples() << ")\n";
+        return 0;
+    }
+
     // SGD opt(model.parameters(), lr);
     Adam opt(model.parameters(), lr);
     CosineAnnealingWR scheduler(lr, 1e-5F, 5, 2.0F);  // T0=5, doubles each restart
@@ -112,6 +158,17 @@ int main(int argc, char* argv[]) {
                   << "  test_acc " << test_acc << "\n";
 
         scheduler.step();
+    }
+
+    if (!save_path.empty()) {
+        // ensure directory exists
+        size_t slash = save_path.rfind('/');
+        if (slash != std::string::npos) {
+            std::string dir = save_path.substr(0, slash);
+            std::string cmd = "mkdir -p " + dir;
+            std::system(cmd.c_str());
+        }
+        save_model(model, cfg, save_path);
     }
 
     return 0;

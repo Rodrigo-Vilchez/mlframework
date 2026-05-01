@@ -16,6 +16,7 @@ add_library(mlframework_core
     src/loss.cpp
     src/dataloader.cpp
     src/mlp.cpp
+    src/model_io.cpp
 )
 
 target_include_directories(mlframework_core PUBLIC

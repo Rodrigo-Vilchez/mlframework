@@ -13,7 +13,7 @@ class MLP {
         float dropout_ = 0.0F, bool use_batchnorm = false);
 
     TensorPtr forward(TensorPtr x);
-    std::vector<TensorPtr> parameters();
+    std::vector<TensorPtr> parameters() const;
 
    private:
     std::vector<Linear> layers_;

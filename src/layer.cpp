@@ -28,7 +28,7 @@ TensorPtr Linear::forward(TensorPtr x) {
     return ops::add_bias(ops::matmul(x, weight_), bias_);
 }
 
-std::vector<TensorPtr> Linear::parameters() { return {weight_, bias_}; }
+std::vector<TensorPtr> Linear::parameters() const { return {weight_, bias_}; }
 
 // --- Activations ---
 
@@ -201,6 +201,6 @@ TensorPtr BatchNorm1d::forward(TensorPtr x) {
     return result;
 }
 
-std::vector<TensorPtr> BatchNorm1d::parameters() { return {gamma_, beta_}; }
+std::vector<TensorPtr> BatchNorm1d::parameters() const { return {gamma_, beta_}; }
 
 }  // namespace mlf
