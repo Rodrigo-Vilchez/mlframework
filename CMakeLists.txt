@@ -17,6 +17,7 @@ add_library(mlframework_core
     src/dataloader.cpp
     src/mlp.cpp
     src/model_io.cpp
+    src/cnn.cpp
 )
 
 target_include_directories(mlframework_core PUBLIC

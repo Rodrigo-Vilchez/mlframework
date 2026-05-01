@@ -62,7 +62,7 @@ class Conv2d {
            size_t padding = 0);
 
     TensorPtr forward(TensorPtr x);  // x: {N, C, H, W}
-    std::vector<TensorPtr> parameters();
+    std::vector<TensorPtr> parameters() const;
 
    private:
     size_t in_channels_, out_channels_, kernel_size_, stride_, padding_;
@@ -71,5 +71,16 @@ class Conv2d {
 };
 
 TensorPtr flatten(TensorPtr x);  // {N, ...} -> {N, numel/N}
+
+class MaxPool2d {
+   public:
+    explicit MaxPool2d(size_t kernel_size, size_t stride = 0);
+    // stride=0 means stride=kernel_size (non-overlapping windows)
+
+    TensorPtr forward(TensorPtr x);  // x: {N, C, H, W}
+
+   private:
+    size_t kernel_size_, stride_;
+};
 
 }  // namespace mlf

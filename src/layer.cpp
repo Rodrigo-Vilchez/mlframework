@@ -311,7 +311,7 @@ TensorPtr Conv2d::forward(TensorPtr x) {
     return result;
 }
 
-std::vector<TensorPtr> Conv2d::parameters() { return {weight_, bias_}; }
+std::vector<TensorPtr> Conv2d::parameters() const { return {weight_, bias_}; }
 
 TensorPtr flatten(TensorPtr x) {
     size_t N = x->shape[0];
@@ -324,6 +324,65 @@ TensorPtr flatten(TensorPtr x) {
         result->backward_fn = [x, r = result.get()]() {
             for (size_t i = 0; i < x->numel(); i++) {
                 x->grad[i] += r->grad[i];
+            }
+        };
+    }
+    return result;
+}
+
+MaxPool2d::MaxPool2d(size_t kernel_size, size_t stride)
+    : kernel_size_(kernel_size), stride_(stride == 0 ? kernel_size : stride) {}
+
+TensorPtr MaxPool2d::forward(TensorPtr x) {
+    if (x->shape.size() != 4) {
+        throw std::invalid_argument("MaxPool2d::forward expects {N, C, H, W}");
+    }
+    size_t N = x->shape[0];
+    size_t C = x->shape[1];
+    size_t H = x->shape[2];
+    size_t W = x->shape[3];
+    size_t K = kernel_size_;
+    size_t S = stride_;
+    size_t OH = (H - K) / S + 1;
+    size_t OW = (W - K) / S + 1;
+
+    auto result = make_tensor({N, C, OH, OW}, x->requires_grad);
+
+    // store argmax indices for backward
+    std::vector<size_t> argmax(N * C * OH * OW);
+
+    for (size_t n = 0; n < N; n++) {
+        for (size_t c = 0; c < C; c++) {
+            for (size_t i = 0; i < OH; i++) {
+                for (size_t j = 0; j < OW; j++) {
+                    float max_val = -std::numeric_limits<float>::infinity();
+                    size_t max_idx = 0;
+
+                    for (size_t ki = 0; ki < K; ki++) {
+                        for (size_t kj = 0; kj < K; kj++) {
+                            size_t ih = i * S + ki;
+                            size_t iw = j * S + kj;
+                            size_t idx = n * (C * H * W) + c * (H * W) + ih * W + iw;
+                            if (x->data[idx] > max_val) {
+                                max_val = x->data[idx];
+                                max_idx = idx;
+                            }
+                        }
+                    }
+
+                    size_t out_idx = n * (C * OH * OW) + c * (OH * OW) + i * OW + j;
+                    result->data[out_idx] = max_val;
+                    argmax[out_idx] = max_idx;
+                }
+            }
+        }
+    }
+
+    if (x->requires_grad) {
+        result->inputs = {x};
+        result->backward_fn = [x, r = result.get(), argmax]() {
+            for (size_t i = 0; i < r->numel(); i++) {
+                x->grad[argmax[i]] += r->grad[i];
             }
         };
     }

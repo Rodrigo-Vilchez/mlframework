@@ -2,6 +2,7 @@
 #include <cmath>
 #include <iostream>
 
+#include "mlframework/cnn.hpp"
 #include "mlframework/dataloader.hpp"
 #include "mlframework/layer.hpp"
 #include "mlframework/loss.hpp"
@@ -269,6 +270,58 @@ void test_conv2d_backward_runs() {
     std::cout << "[OK] conv2d backward runs\n";
 }
 
+void test_maxpool_forward_shape() {
+    MaxPool2d pool(2);
+    auto x = make_tensor({1, 4, 8, 8}, std::vector<float>(1 * 4 * 64, 1.0F));
+    auto y = pool.forward(x);
+    assert(y->shape[0] == 1);
+    assert(y->shape[1] == 4);
+    assert(y->shape[2] == 4);
+    assert(y->shape[3] == 4);
+    std::cout << "[OK] maxpool forward shape\n";
+}
+
+void test_maxpool_backward_routes_to_max() {
+    MaxPool2d pool(2);
+    // 1x1x2x2 input, max is at position [0,0,1,1] = 4.0
+    auto x = make_tensor({1, 1, 2, 2}, {1.0F, 2.0F, 3.0F, 4.0F}, true);
+    auto y = pool.forward(x);
+    y->backward();
+    assert(x->grad[0] == 0.0F);
+    assert(x->grad[3] == 1.0F);  // only the max gets gradient
+    std::cout << "[OK] maxpool backward routes to max\n";
+}
+
+void test_cnn_forward_shape() {
+    CNN model;
+    // MNIST-like input: {2, 1, 28, 28}
+    auto x = make_tensor({2, 1, 28, 28}, std::vector<float>(2 * 784, 0.5F));
+    auto y = model.forward(x);
+    assert(y->shape[0] == 2);
+    assert(y->shape[1] == 10);
+    std::cout << "[OK] CNN forward shape\n";
+}
+
+void test_cnn_backward_runs() {
+    CNN model;
+    auto x = make_tensor({2, 1, 28, 28}, std::vector<float>(2 * 784, 0.5F), true);
+    auto labels = make_tensor({2}, std::vector<float>{0.0F, 1.0F});
+    auto logits = model.forward(x);
+    auto loss = cross_entropy(logits, labels);
+    loss->backward();
+    bool any_nonzero = false;
+    for (auto& p : model.parameters()) {
+        for (float g : p->grad) {
+            if (g != 0.0F) {
+                any_nonzero = true;
+                break;
+            }
+        }
+    }
+    assert(any_nonzero);
+    std::cout << "[OK] CNN backward runs\n";
+}
+
 int main() {
     test_constructor_zeros();
     test_constructor_data();
@@ -293,6 +346,10 @@ int main() {
     test_mlp_backward_runs();
     test_conv2d_forward_shape();
     test_conv2d_backward_runs();
+    test_maxpool_forward_shape();
+    test_maxpool_backward_routes_to_max();
+    test_cnn_forward_shape();
+    test_cnn_backward_runs();
     std::cout << "\nAll tests passed.\n";
     return 0;
 }

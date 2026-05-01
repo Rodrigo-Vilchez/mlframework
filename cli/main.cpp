@@ -60,6 +60,7 @@ int main(int argc, char* argv[]) {
     std::string save_path;
     std::string load_path;
     bool eval_only = false;
+    std::string model_type = "mlp";
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -83,6 +84,9 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--eval-only") {
             eval_only = true;
+        }
+        if (arg == "--model" && i + 1 < argc) {
+            model_type = argv[++i];
         }
     }
 
