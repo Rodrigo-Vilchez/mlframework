@@ -1,37 +1,52 @@
 #include "mlframework/tensor.hpp"
 
+#include <cuda_runtime.h>
+
 #include <iostream>
 #include <numeric>
 #include <stdexcept>
 #include <unordered_set>
 
+#include "mlframework/cuda_internal.hpp"
+
 namespace mlf {
 
-TensorPtr make_tensor(std::vector<size_t> shape, bool requires_grad) {
-    return std::shared_ptr<Tensor>(new Tensor(std::move(shape), requires_grad));
+TensorPtr make_tensor(std::vector<size_t> shape, bool requires_grad, Device device) {
+    return std::shared_ptr<Tensor>(new Tensor(std::move(shape), requires_grad, device));
 }
 
-TensorPtr make_tensor(std::vector<size_t> shape, std::vector<float> data, bool requires_grad) {
-    return std::shared_ptr<Tensor>(new Tensor(std::move(shape), std::move(data), requires_grad));
+TensorPtr make_tensor(std::vector<size_t> shape, std::vector<float> data, bool requires_grad,
+                      Device device) {
+    return std::shared_ptr<Tensor>(
+        new Tensor(std::move(shape), std::move(data), requires_grad, device));
 }
 
-Tensor::Tensor(std::vector<size_t> shape, bool requires_grad)
-    : shape(std::move(shape)), requires_grad(requires_grad) {
+Tensor::Tensor(std::vector<size_t> shape, bool requires_grad, Device dev)
+    : shape(std::move(shape)), requires_grad(requires_grad), device(dev) {
     compute_strides();
-    data.resize(numel(), 0.0F);
-    if (requires_grad) {
-        grad.resize(numel(), 0.0F);
+    if (device == Device::CPU) {
+        data.resize(numel(), 0.0F);
+        if (requires_grad) grad.resize(numel(), 0.0F);
+    } else {
+        tensor_alloc_cuda(*this);
     }
 }
 
-Tensor::Tensor(std::vector<size_t> shape, std::vector<float> data, bool requires_grad)
-    : shape(std::move(shape)), data(std::move(data)), requires_grad(requires_grad) {
-    if (this->data.size() != numel()) {
+Tensor::Tensor(std::vector<size_t> shape, std::vector<float> data, bool requires_grad, Device dev)
+    : shape(std::move(shape)), data(std::move(data)), requires_grad(requires_grad), device(dev) {
+    if (device == Device::CPU && this->data.size() != numel()) {
         throw std::invalid_argument("data size does not match shape");
     }
     compute_strides();
-    if (requires_grad) {
-        grad.resize(numel(), 0.0F);
+    if (device == Device::CUDA) {
+        // upload data to GPU then clear CPU buffer
+        tensor_alloc_cuda(*this);
+        cudaMemcpy(cuda_data_ptr(), this->data.data(), numel() * sizeof(float),
+                   cudaMemcpyHostToDevice);
+        this->data.clear();
+        this->grad.clear();
+    } else {
+        if (requires_grad) grad.resize(numel(), 0.0F);
     }
 }
 

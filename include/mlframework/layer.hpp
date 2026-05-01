@@ -6,19 +6,6 @@
 
 namespace mlf {
 
-// Global training mode flag
-inline bool& training_mode() {
-    static bool flag = true;
-    return flag;
-}
-
-struct TrainMode {
-    TrainMode() { training_mode() = true; }
-};
-struct EvalMode {
-    EvalMode() { training_mode() = false; }
-};
-
 class Linear {
    public:
     Linear(size_t in_features, size_t out_features);

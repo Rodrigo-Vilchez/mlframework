@@ -8,6 +8,7 @@
 #include "mlframework/loss.hpp"
 #include "mlframework/mlp.hpp"
 #include "mlframework/ops.hpp"
+#include "mlframework/ops_cuda.hpp"
 #include "mlframework/optimizer.hpp"
 #include "mlframework/tensor.hpp"
 
@@ -322,6 +323,34 @@ void test_cnn_backward_runs() {
     std::cout << "[OK] CNN backward runs\n";
 }
 
+void test_cuda_roundtrip() {
+    auto a = make_tensor({2, 2}, {1.0F, 2.0F, 3.0F, 4.0F});
+    auto a_gpu = to(a, Device::CUDA);
+    auto a_cpu = to(a_gpu, Device::CPU);
+    assert(a_cpu->data[0] == 1.0F);
+    assert(a_cpu->data[3] == 4.0F);
+    std::cout << "[OK] CUDA CPU->GPU->CPU roundtrip\n";
+}
+
+void test_cuda_matmul() {
+    auto x = to(make_tensor({2, 2}, {1.0F, 2.0F, 3.0F, 4.0F}), Device::CUDA);
+    auto y = to(make_tensor({2, 2}, {5.0F, 6.0F, 7.0F, 8.0F}), Device::CUDA);
+    auto z = ops::matmul(x, y);
+    auto z_cpu = to(z, Device::CPU);
+    assert(z_cpu->data[0] == 19.0F);
+    assert(z_cpu->data[3] == 50.0F);
+    std::cout << "[OK] CUDA matmul\n";
+}
+
+void test_cuda_relu() {
+    auto x = to(make_tensor({4}, {-2.0F, -1.0F, 0.0F, 3.0F}, true), Device::CUDA);
+    auto y = cuda::relu_cuda(x);
+    auto y_cpu = to(y, Device::CPU);
+    assert(y_cpu->data[0] == 0.0F);
+    assert(y_cpu->data[3] == 3.0F);
+    std::cout << "[OK] CUDA relu\n";
+}
+
 int main() {
     test_constructor_zeros();
     test_constructor_data();
@@ -350,6 +379,9 @@ int main() {
     test_maxpool_backward_routes_to_max();
     test_cnn_forward_shape();
     test_cnn_backward_runs();
+    test_cuda_roundtrip();
+    test_cuda_matmul();
+    test_cuda_relu();
     std::cout << "\nAll tests passed.\n";
     return 0;
 }

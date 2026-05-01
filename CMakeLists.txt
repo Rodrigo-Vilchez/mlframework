@@ -1,13 +1,18 @@
 cmake_minimum_required(VERSION 3.25)
-project(mlframework VERSION 0.1.0 LANGUAGES CXX)
+project(mlframework VERSION 0.1.0 LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(BLAS REQUIRED)
 
-# Core library
+# locate CUDA libs manually
+find_library(CUDART_LIB cudart HINTS /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu)
+find_library(CUBLAS_LIB cublas HINTS /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu)
+find_path(CUDA_INCLUDE_DIR cuda_runtime.h HINTS /usr/local/cuda/include)
+
 add_library(mlframework_core
     src/tensor.cpp
     src/ops.cpp
@@ -16,21 +21,29 @@ add_library(mlframework_core
     src/loss.cpp
     src/dataloader.cpp
     src/mlp.cpp
-    src/model_io.cpp
     src/cnn.cpp
+    src/model_io.cpp
+    src/cuda/tensor_cuda.cu
+    src/cuda/ops_cuda.cu
 )
 
 target_include_directories(mlframework_core PUBLIC
     ${PROJECT_SOURCE_DIR}/include
+    ${CUDA_INCLUDE_DIR}
 )
 
-# OpenBLAS
-target_link_libraries(mlframework_core PUBLIC BLAS::BLAS)
+target_link_libraries(mlframework_core PUBLIC
+    BLAS::BLAS
+    ${CUDART_LIB}
+    ${CUBLAS_LIB}
+)
 
-# CLI
+set_target_properties(mlframework_core PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
+)
+
 add_executable(mlframework cli/main.cpp)
 target_link_libraries(mlframework PRIVATE mlframework_core)
 
-# Tests
 add_executable(tests tests/test_tensor.cpp)
 target_link_libraries(tests PRIVATE mlframework_core)
