@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo")
 
 find_package(BLAS REQUIRED)
 
@@ -17,6 +18,7 @@ add_library(mlframework_core
     src/tensor.cpp
     src/ops.cpp
     src/optimizer.cpp
+    src/module.cpp
     src/layer.cpp
     src/loss.cpp
     src/dataloader.cpp
@@ -47,3 +49,6 @@ target_link_libraries(mlframework PRIVATE mlframework_core)
 
 add_executable(tests tests/test_tensor.cpp)
 target_link_libraries(tests PRIVATE mlframework_core)
+
+add_executable(test_mlp_cuda /tmp/test_mlp_cuda.cpp)
+target_link_libraries(test_mlp_cuda PRIVATE mlframework_core)

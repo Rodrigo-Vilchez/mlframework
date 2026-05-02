@@ -9,54 +9,54 @@ TensorPtr cross_entropy(TensorPtr logits, TensorPtr labels) {
     if (logits->shape.size() != 2) {
         throw std::invalid_argument("cross_entropy: logits must be 2D {batch, classes}");
     }
-    if (labels->shape.size() != 1 || labels->shape[0] != logits->shape[0]) {
+
+    // use to_device (autograd node) so gradients flow back to original device
+    bool on_cuda = (logits->device == Device::CUDA);
+    TensorPtr logits_cpu = on_cuda ? to_device(logits, Device::CPU) : logits;
+    TensorPtr labels_cpu = on_cuda ? mlf::to(labels, Device::CPU) : labels;
+
+    if (labels_cpu->shape.size() != 1 || labels_cpu->shape[0] != logits_cpu->shape[0]) {
         throw std::invalid_argument("cross_entropy: labels must be 1D {batch}");
     }
 
-    size_t B = logits->shape[0];
-    size_t C = logits->shape[1];
+    size_t B = logits_cpu->shape[0];
+    size_t C = logits_cpu->shape[1];
 
-    // Softmax + log + NLL — fused for numerical stability
     std::vector<float> probs(B * C);
-
     for (size_t i = 0; i < B; i++) {
-        // 1. max for stability
-        float max_val = logits->data[i * C];
-        for (size_t j = 1; j < C; j++) {
-            max_val = std::max(max_val, logits->data[i * C + j]);
-        }
-        // 2. exp(x - max)
+        float max_val = logits_cpu->data[i * C];
+        for (size_t j = 1; j < C; j++) max_val = std::max(max_val, logits_cpu->data[i * C + j]);
+
         float sum_exp = 0.0F;
         for (size_t j = 0; j < C; j++) {
-            probs[i * C + j] = std::exp(logits->data[i * C + j] - max_val);
+            probs[i * C + j] = std::exp(logits_cpu->data[i * C + j] - max_val);
             sum_exp += probs[i * C + j];
         }
-        // 3. normalize
-        for (size_t j = 0; j < C; j++) {
-            probs[i * C + j] /= sum_exp;
-        }
+        for (size_t j = 0; j < C; j++) probs[i * C + j] /= sum_exp;
     }
 
-    // NLL loss: -log(p[correct_class]), averaged over batch
     float loss_val = 0.0F;
     for (size_t i = 0; i < B; i++) {
-        size_t cls = static_cast<size_t>(labels->data[i]);
+        size_t cls = static_cast<size_t>(labels_cpu->data[i]);
         loss_val -= std::log(probs[i * C + cls] + 1e-9F);
     }
     loss_val /= static_cast<float>(B);
 
-    bool rg = logits->requires_grad;
+    // result is always CPU scalar — backward starts here
+    bool rg = logits_cpu->requires_grad;
     auto result = make_tensor({1}, {loss_val}, rg);
 
     if (rg) {
-        result->inputs = {logits, labels};
-        result->backward_fn = [logits, labels, result, probs, B, C]() {
-            float grad_out = result->grad[0] / static_cast<float>(B);
+        // logits_cpu is in result->inputs — to_device's backward_fn
+        // will automatically transfer logits_cpu->grad back to CUDA
+        result->inputs = {logits_cpu, labels_cpu};
+        result->backward_fn = [logits_cpu, labels_cpu, r = result.get(), probs, B, C]() {
+            float grad_out = r->grad[0] / static_cast<float>(B);
             for (size_t i = 0; i < B; i++) {
-                size_t cls = static_cast<size_t>(labels->data[i]);
+                size_t cls = static_cast<size_t>(labels_cpu->data[i]);
                 for (size_t j = 0; j < C; j++) {
                     float y = (j == cls) ? 1.0F : 0.0F;
-                    logits->grad[i * C + j] += grad_out * (probs[i * C + j] - y);
+                    logits_cpu->grad[i * C + j] += grad_out * (probs[i * C + j] - y);
                 }
             }
         };

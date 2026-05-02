@@ -36,6 +36,8 @@ class Adam {
     std::vector<std::vector<float>> m_;
     std::vector<std::vector<float>> v_;
     size_t t_{0};
+    std::vector<std::shared_ptr<float>> cuda_m_;
+    std::vector<std::shared_ptr<float>> cuda_v_;
 };
 
 class CosineAnnealingWR {

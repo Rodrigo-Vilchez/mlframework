@@ -351,6 +351,20 @@ void test_cuda_relu() {
     std::cout << "[OK] CUDA relu\n";
 }
 
+void test_to_device_backward() {
+    // x on CPU, move to CUDA, compute, move back, backward
+    auto x = make_tensor({4}, {1.0F, 2.0F, 3.0F, 4.0F}, true);
+    auto x_gpu = to_device(x, Device::CUDA);     // CPU→CUDA node
+    auto y_gpu = cuda::relu_cuda(x_gpu);         // relu on CUDA
+    auto y_cpu = to_device(y_gpu, Device::CPU);  // CUDA→CPU node
+    y_cpu->backward();                           // should flow back to x
+
+    // relu grad: all inputs > 0, so grad = 1 for all
+    assert(x->grad[0] == 1.0F);
+    assert(x->grad[3] == 1.0F);
+    std::cout << "[OK] to_device backward across CPU/CUDA boundary\n";
+}
+
 int main() {
     test_constructor_zeros();
     test_constructor_data();
@@ -382,6 +396,7 @@ int main() {
     test_cuda_roundtrip();
     test_cuda_matmul();
     test_cuda_relu();
+    test_to_device_backward();
     std::cout << "\nAll tests passed.\n";
     return 0;
 }

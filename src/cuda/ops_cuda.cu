@@ -5,6 +5,16 @@
 
 #include "mlframework/ops.hpp"
 
+#define CUDA_CHECK(call)                                                      \
+    do {                                                                      \
+        cudaError_t err = call;                                               \
+        if (err != cudaSuccess) {                                             \
+            fprintf(stderr, "CUDA error at %s:%d — %s\n", __FILE__, __LINE__, \
+                    cudaGetErrorString(err));                                 \
+            std::abort();                                                     \
+        }                                                                     \
+    } while (0)
+
 namespace mlf::cuda {
 
 // cuBLAS handle — initialized once
@@ -16,6 +26,16 @@ static cublasHandle_t& cublas_handle() {
     }();
     return handle;
 }
+
+static struct CublasCleanup {
+    ~CublasCleanup() {
+        // only cleanup if CUDA context is still valid
+        if (cudaSetDevice(0) == cudaSuccess) {
+            cublasDestroy(cublas_handle());
+            cudaDeviceReset();
+        }
+    }
+} cublas_cleanup;
 
 // element-wise kernels
 __global__ void kernel_add(const float* a, const float* b, float* c, size_t n) {
@@ -62,6 +82,21 @@ __global__ void kernel_mul_backward(const float* grad, const float* other, float
                                     size_t n) {
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) grad_in[i] += grad[i] * other[i];
+}
+
+__global__ void kernel_adam_step(float* data, float* grad, float* m, float* v, float lr,
+                                 float beta1, float beta2, float epsilon, float bc1, float bc2,
+                                 size_t n) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        float g = grad[i];
+        m[i] = beta1 * m[i] + (1.0F - beta1) * g;
+        v[i] = beta2 * v[i] + (1.0F - beta2) * g * g;
+        float m_hat = m[i] / bc1;
+        float v_hat = v[i] / bc2;
+        data[i] -= lr * m_hat / (sqrtf(v_hat) + epsilon);
+        grad[i] = 0.0F;  // zero_grad fused
+    }
 }
 
 static dim3 blocks(size_t n, size_t threads = 256) {
@@ -201,6 +236,11 @@ TensorPtr relu_cuda(TensorPtr x) {
         };
     }
     return result;
+}
+
+void adam_step_cuda(float* data, float* grad, float* m, float* v, float lr, float beta1,
+                    float beta2, float epsilon, float bc1, float bc2, size_t n) {
+    kernel_adam_step<<<blocks(n), 256>>>(data, grad, m, v, lr, beta1, beta2, epsilon, bc1, bc2, n);
 }
 
 }  // namespace mlf::cuda

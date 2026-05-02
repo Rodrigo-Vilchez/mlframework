@@ -1,3 +1,5 @@
+#include <cuda_runtime.h>
+
 #include <iostream>
 #include <memory>
 #include <string>
@@ -20,23 +22,36 @@ struct Model {
     std::unique_ptr<MLP> mlp;
     std::unique_ptr<CNN> cnn;
 
-    TensorPtr forward(TensorPtr x) { return type == Type::MLP ? mlp->forward(x) : cnn->forward(x); }
+    Module& module() {
+        return type == Type::MLP ? static_cast<Module&>(*mlp) : static_cast<Module&>(*cnn);
+    }
+
+    TensorPtr forward(TensorPtr x) { return module().forward(x); }
+
     std::vector<TensorPtr> parameters() const {
         return type == Type::MLP ? mlp->parameters() : cnn->parameters();
     }
+
+    void to(Device device) { module().to(device); }
+    void train() { module().train(); }
+    void eval() { module().eval(); }
 };
 
 // --- helpers ---
 
-static TensorPtr prepare_input(TensorPtr images, Model::Type type) {
+static TensorPtr prepare_input(TensorPtr images, Model::Type type, Device device) {
+    TensorPtr out = images;
     if (type == Model::Type::CNN) {
         size_t N = images->shape[0];
-        return reshape(images, {N, 1, 28, 28});
+        out = reshape(out, {N, 1, 28, 28});
     }
-    return images;
+    if (device == Device::CUDA) {
+        out = to(out, Device::CUDA);
+    }
+    return out;
 }
 
-static float compute_accuracy(Model& model, MNISTLoader& loader) {
+static float compute_accuracy(Model& model, MNISTLoader& loader, Device active_device) {
     loader.reset();
     size_t correct = 0;
     size_t total = 0;
@@ -45,8 +60,12 @@ static float compute_accuracy(Model& model, MNISTLoader& loader) {
     NoGrad ng;
     while (loader.has_next()) {
         Batch b = loader.next();
-        auto input = prepare_input(b.images, model.type);
+        auto input = prepare_input(b.images, model.type, active_device);
         auto logits = model.forward(input);
+
+        // bring to CPU for argmax
+        if (logits->device == Device::CUDA) logits = mlf::to(logits, Device::CPU);
+
         size_t B = logits->shape[0];
         size_t C = logits->shape[1];
 
@@ -68,13 +87,13 @@ static float compute_accuracy(Model& model, MNISTLoader& loader) {
 }
 
 // TODO(#1): remove warm-up once BatchNorm running stats are persisted
-static void warmup_batchnorm(Model& model, MNISTLoader& loader) {
+static void warmup_batchnorm(Model& model, MNISTLoader& loader, Device active_device) {
     std::cout << "Running warm-up pass to reconstruct BatchNorm stats...\n";
     loader.reset();
     NoGrad ng;
     while (loader.has_next()) {
         Batch b = loader.next();
-        auto input = prepare_input(b.images, model.type);
+        auto input = prepare_input(b.images, model.type, active_device);
         model.forward(input);
     }
     std::cout << "Warm-up done.\n";
@@ -83,6 +102,7 @@ static void warmup_batchnorm(Model& model, MNISTLoader& loader) {
 // --- main ---
 
 int main(int argc, char* argv[]) {
+    cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
     std::string data_dir = "data/mnist";
     size_t epochs = 5;
     size_t batch_size = 64;
@@ -91,6 +111,7 @@ int main(int argc, char* argv[]) {
     std::string load_path;
     bool eval_only = false;
     std::string model_type = "mlp";
+    std::string device_str = "cpu";
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -117,6 +138,9 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--eval-only") {
             eval_only = true;
+        }
+        if (arg == "--device" && i + 1 < argc) {
+            device_str = argv[++i];
         }
     }
 
@@ -152,6 +176,17 @@ int main(int argc, char* argv[]) {
         std::cout << "Model: MLP (784→128→64→10)\n";
     }
 
+    if (device_str == "cuda") {
+        std::cout << "Moving model to CUDA...\n";
+        if (model.type == Model::Type::MLP)
+            model.mlp->to(Device::CUDA);
+        else
+            model.cnn->to(Device::CUDA);
+        std::cout << "Done.\n";
+    }
+
+    Device active_device = (device_str == "cuda") ? Device::CUDA : Device::CPU;
+
     if (!load_path.empty()) {
         // load only supported for MLP for now
         if (model.type != Model::Type::MLP) {
@@ -160,11 +195,11 @@ int main(int argc, char* argv[]) {
         }
         ModelConfig cfg;
         cfg = load_model(*model.mlp, load_path);
-        warmup_batchnorm(model, train_loader);
+        warmup_batchnorm(model, train_loader, active_device);
     }
 
     if (eval_only) {
-        float acc = compute_accuracy(model, test_loader);
+        float acc = compute_accuracy(model, test_loader, active_device);
         size_t correct = static_cast<size_t>(acc * test_loader.num_samples());
         std::cout << "Test accuracy: " << acc << " (" << correct << " / "
                   << test_loader.num_samples() << ")\n";
@@ -187,12 +222,15 @@ int main(int argc, char* argv[]) {
 
         while (train_loader.has_next()) {
             Batch b = train_loader.next();
-            auto input = prepare_input(b.images, model.type);
-
+            auto input = prepare_input(b.images, model.type, active_device);
+            auto labels = (active_device == Device::CUDA) ? to(b.labels, Device::CUDA) : b.labels;
             opt.zero_grad();
             auto logits = model.forward(input);
             auto loss = cross_entropy(logits, b.labels);
             loss->backward();
+
+            if (active_device == Device::CUDA) cudaDeviceSynchronize();
+
             opt.step();
 
             epoch_loss += loss->data[0];
@@ -204,8 +242,8 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        float train_acc = compute_accuracy(model, train_loader);
-        float test_acc = compute_accuracy(model, test_loader);
+        float train_acc = compute_accuracy(model, train_loader, active_device);
+        float test_acc = compute_accuracy(model, test_loader, active_device);
 
         std::cout << "Epoch " << epoch << "  lr " << current_lr << "  loss "
                   << epoch_loss / static_cast<float>(steps) << "  train_acc " << train_acc

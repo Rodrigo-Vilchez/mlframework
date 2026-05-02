@@ -80,21 +80,38 @@ size_t Tensor::numel() const {
     return std::accumulate(shape.begin(), shape.end(), size_t{1}, std::multiplies<size_t>{});
 }
 
-void Tensor::zero_grad() { std::fill(grad.begin(), grad.end(), 0.0F); }
+void Tensor::zero_grad() {
+    if (device == Device::CUDA) {
+        if (cuda_grad) cudaMemset(cuda_grad_ptr(), 0, numel() * sizeof(float));
+    } else {
+        std::fill(grad.begin(), grad.end(), 0.0F);
+    }
+}
 
 void Tensor::backward() {
-    if (grad.empty()) {
-        grad.assign(numel(), 0.0F);
+    if (device == Device::CUDA) {
+        if (!cuda_grad) {
+            float* ptr = nullptr;
+            cudaMalloc(&ptr, numel() * sizeof(float));
+            cudaMemset(ptr, 0, numel() * sizeof(float));
+            cuda_grad = std::shared_ptr<float>(ptr, [](float* p) { cudaFree(p); });
+        }
+        float one = 1.0F;
+        cudaMemcpy(cuda_grad_ptr(), &one, sizeof(float), cudaMemcpyHostToDevice);
+    } else {
+        if (grad.empty()) grad.assign(numel(), 0.0F);
+        std::fill(grad.begin(), grad.end(), 1.0F);
     }
-    std::fill(grad.begin(), grad.end(), 1.0F);
 
     std::vector<Tensor*> topo;
+    std::vector<TensorPtr> alive;  // keeps ALL tensors alive during backward
     std::unordered_set<Tensor*> visited;
 
     std::function<void(Tensor*)> build_topo = [&](Tensor* node) {
         if (visited.count(node)) return;
         visited.insert(node);
         for (auto& inp : node->inputs) {
+            alive.push_back(inp);  // prevent premature free
             build_topo(inp.get());
         }
         topo.push_back(node);
@@ -107,6 +124,7 @@ void Tensor::backward() {
             (*it)->backward_fn();
         }
     }
+    // alive destructs here - all tensors released cleanly after backward
 }
 
 void Tensor::print() const {

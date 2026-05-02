@@ -18,6 +18,7 @@ TensorPtr make_tensor(std::vector<size_t> shape, std::vector<float> data,
                       bool requires_grad = false, Device device = Device::CPU);
 
 TensorPtr to(TensorPtr x, Device device);
+TensorPtr to_device(TensorPtr x, Device target);
 TensorPtr reshape(TensorPtr x, std::vector<size_t> new_shape);
 
 struct Tensor {

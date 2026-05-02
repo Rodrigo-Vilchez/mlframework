@@ -1,8 +1,11 @@
 #include "mlframework/optimizer.hpp"
 
+#include <cuda_runtime.h>
+
 #include <cmath>
 #include <stdexcept>
 
+#include "mlframework/ops_cuda.hpp"
 namespace mlf {
 
 SGD::SGD(std::vector<TensorPtr> params, float lr, float momentum)
@@ -44,6 +47,21 @@ Adam::Adam(std::vector<TensorPtr> params, float lr, float beta1, float beta2, fl
         m_[i].assign(params_[i]->numel(), 0.0F);
         v_[i].assign(params_[i]->numel(), 0.0F);
     }
+    if (!params_.empty() && params_[0]->device == Device::CUDA) {
+        cuda_m_.resize(params_.size());
+        cuda_v_.resize(params_.size());
+        for (size_t i = 0; i < params_.size(); i++) {
+            size_t n = params_[i]->numel();
+            float* m_ptr = nullptr;
+            float* v_ptr = nullptr;
+            cudaMalloc(&m_ptr, n * sizeof(float));
+            cudaMalloc(&v_ptr, n * sizeof(float));
+            cudaMemset(m_ptr, 0, n * sizeof(float));
+            cudaMemset(v_ptr, 0, n * sizeof(float));
+            cuda_m_[i] = std::shared_ptr<float>(m_ptr, [](float* p) { cudaFree(p); });
+            cuda_v_[i] = std::shared_ptr<float>(v_ptr, [](float* p) { cudaFree(p); });
+        }
+    }
 }
 
 void Adam::step() {
@@ -53,14 +71,23 @@ void Adam::step() {
 
     for (size_t i = 0; i < params_.size(); i++) {
         auto& p = params_[i];
-        if (!p->requires_grad || p->grad.empty()) continue;
-        for (size_t j = 0; j < p->numel(); j++) {
-            float g = p->grad[j];
-            m_[i][j] = beta1_ * m_[i][j] + (1.0F - beta1_) * g;
-            v_[i][j] = beta2_ * v_[i][j] + (1.0F - beta2_) * g * g;
-            float m_hat = m_[i][j] / bc1;
-            float v_hat = v_[i][j] / bc2;
-            p->data[j] -= lr_ * m_hat / (std::sqrt(v_hat) + epsilon_);
+        if (!p->requires_grad) continue;
+
+        if (p->device == Device::CUDA) {
+            if (p->cuda_grad == nullptr) continue;
+            cuda::adam_step_cuda(p->cuda_data_ptr(), p->cuda_grad_ptr(), cuda_m_[i].get(),
+                                 cuda_v_[i].get(), lr_, beta1_, beta2_, epsilon_, bc1, bc2,
+                                 p->numel());
+        } else {
+            if (p->grad.empty()) continue;
+            for (size_t j = 0; j < p->numel(); j++) {
+                float g = p->grad[j];
+                m_[i][j] = beta1_ * m_[i][j] + (1.0F - beta1_) * g;
+                v_[i][j] = beta2_ * v_[i][j] + (1.0F - beta2_) * g * g;
+                float m_hat = m_[i][j] / bc1;
+                float v_hat = v_[i][j] / bc2;
+                p->data[j] -= lr_ * m_hat / (std::sqrt(v_hat) + epsilon_);
+            }
         }
     }
 }
