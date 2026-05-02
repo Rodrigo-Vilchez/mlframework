@@ -22,6 +22,8 @@ class BatchNorm1d : public Module {
    public:
     explicit BatchNorm1d(size_t num_features, float epsilon = 1e-5F, float momentum = 0.1F);
     TensorPtr forward(TensorPtr x) override;
+    void collect_running_stats(Module::RunningStats& stats) const override;
+    void apply_running_stats(const Module::RunningStats& stats, size_t& idx) override;
 
    private:
     size_t num_features_;

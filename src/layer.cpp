@@ -226,6 +226,20 @@ TensorPtr BatchNorm1d::forward(TensorPtr x) {
     return result;
 }
 
+void BatchNorm1d::collect_running_stats(Module::RunningStats& stats) const {
+    stats.push_back({running_mean_, running_var_});
+    // no submodules - no recursion needed
+}
+
+void BatchNorm1d::apply_running_stats(const Module::RunningStats& stats, size_t& idx) {
+    if (idx >= stats.size()) {
+        throw std::runtime_error("apply_running_stats: index out of range");
+    }
+    running_mean_ = stats[idx].first;
+    running_var_ = stats[idx].second;
+    idx++;
+}
+
 Conv2d::Conv2d(size_t in_channels, size_t out_channels, size_t kernel_size, size_t stride,
                size_t padding)
     : in_channels_(in_channels),

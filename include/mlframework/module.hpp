@@ -33,6 +33,12 @@ class Module {
     }
     bool is_training() const { return training_; }
 
+    // collect running stats from all BatchNorm layers in DFS pre-order
+    // each entry is {mean_vector, var_vector}
+    using RunningStats = std::vector<std::pair<std::vector<float>, std::vector<float>>>;
+    virtual void collect_running_stats(RunningStats& stats) const;
+    virtual void apply_running_stats(const RunningStats& stats, size_t& idx);
+
    protected:
     void register_parameter(const std::string& name, TensorPtr& param);
     void register_module(const std::string& name, Module& submodule);

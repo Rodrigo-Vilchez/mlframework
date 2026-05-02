@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(mlframework VERSION 0.1.0 LANGUAGES CXX CUDA)
+project(mlframework VERSION 0.3.0 LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,7 +9,6 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo")
 
 find_package(BLAS REQUIRED)
 
-# locate CUDA libs manually
 find_library(CUDART_LIB cudart HINTS /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu)
 find_library(CUBLAS_LIB cublas HINTS /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu)
 find_path(CUDA_INCLUDE_DIR cuda_runtime.h HINTS /usr/local/cuda/include)

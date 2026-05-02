@@ -86,19 +86,6 @@ static float compute_accuracy(Model& model, MNISTLoader& loader, Device active_d
     return static_cast<float>(correct) / static_cast<float>(total);
 }
 
-// TODO(#1): remove warm-up once BatchNorm running stats are persisted
-static void warmup_batchnorm(Model& model, MNISTLoader& loader, Device active_device) {
-    std::cout << "Running warm-up pass to reconstruct BatchNorm stats...\n";
-    loader.reset();
-    NoGrad ng;
-    while (loader.has_next()) {
-        Batch b = loader.next();
-        auto input = prepare_input(b.images, model.type, active_device);
-        model.forward(input);
-    }
-    std::cout << "Warm-up done.\n";
-}
-
 // --- main ---
 
 int main(int argc, char* argv[]) {
@@ -195,7 +182,6 @@ int main(int argc, char* argv[]) {
         }
         ModelConfig cfg;
         cfg = load_model(*model.mlp, load_path);
-        warmup_batchnorm(model, train_loader, active_device);
     }
 
     if (eval_only) {

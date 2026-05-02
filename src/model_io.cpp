@@ -9,7 +9,7 @@
 namespace mlf {
 
 static constexpr char MAGIC[4] = {'M', 'L', 'F', '1'};
-static constexpr uint32_t VERSION = 1;
+static constexpr uint32_t VERSION = 2;
 
 static void write_bytes(std::ofstream& f, const void* src, size_t n) {
     f.write(reinterpret_cast<const char*>(src), static_cast<std::streamsize>(n));
@@ -48,23 +48,38 @@ void save_model(const MLP& model, const ModelConfig& cfg, const std::string& pat
     size_t num_tensors = params.size();
     write_bytes(f, &num_tensors, sizeof(size_t));
 
+    size_t total_params = 0;
     for (auto& p : params) {
-        size_t rank = p->shape.size();
+        // bring to CPU if in CUDA - data vector is empty on device
+        TensorPtr p_cpu = (p->device == Device::CUDA) ? to(p, Device::CPU) : p;
+
+        size_t rank = p_cpu->shape.size();
         write_bytes(f, &rank, sizeof(size_t));
-        for (size_t dim : p->shape) {
+        for (size_t dim : p_cpu->shape) {
             write_bytes(f, &dim, sizeof(size_t));
         }
-        write_bytes(f, p->data.data(), p->numel() * sizeof(float));
+        write_bytes(f, p_cpu->data.data(), p_cpu->numel() * sizeof(float));
+        total_params += p_cpu->numel();
     }
-
-    // compute file size for report
-    size_t total_params = 0;
-    for (auto& p : params) total_params += p->numel();
 
     f.flush();
     size_t file_bytes = static_cast<size_t>(f.tellp());
     std::cout << "saved (" << file_bytes / 1024 << " KB, " << num_tensors << " tensors, "
               << total_params << " parameters)\n";
+
+    // --- running stats ---
+    Module::RunningStats stats;
+    model.collect_running_stats(stats);
+
+    size_t num_blocks = stats.size();
+    write_bytes(f, &num_blocks, sizeof(size_t));
+
+    for (auto& [mean, var] : stats) {
+        size_t n = mean.size();
+        write_bytes(f, &n, sizeof(size_t));
+        write_bytes(f, mean.data(), n * sizeof(float));
+        write_bytes(f, var.data(), n * sizeof(float));
+    }
 }
 
 ModelConfig load_model(MLP& model, const std::string& path) {
@@ -152,6 +167,25 @@ ModelConfig load_model(MLP& model, const std::string& path) {
     }
 
     std::cout << "  Parameters   : " << total_params << "\n";
+
+    // --- running stats ---
+    size_t num_blocks = 0;
+    read_bytes(f, &num_blocks, sizeof(size_t));
+
+    Module::RunningStats stats(num_blocks);
+    for (size_t i = 0; i < num_blocks; i++) {
+        size_t n = 0;
+        read_bytes(f, &n, sizeof(size_t));
+        stats[i].first.resize(n);
+        stats[i].second.resize(n);
+        read_bytes(f, stats[i].first.data(), n * sizeof(float));
+        read_bytes(f, stats[i].second.data(), n * sizeof(float));
+    }
+
+    size_t idx = 0;
+    model.apply_running_stats(stats, idx);
+
+    std::cout << "  BatchNorm blocks: " << num_blocks << "\n";
     std::cout << "  loaded.\n";
 
     return cfg;

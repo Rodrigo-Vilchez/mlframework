@@ -41,6 +41,19 @@ void Module::zero_grad() {
     }
 }
 
+void Module::collect_running_stats(RunningStats& stats) const {
+    // base: no stats - subclasses override
+    for (auto& e : submodules_) {
+        e.mod->collect_running_stats(stats);
+    }
+}
+
+void Module::apply_running_stats(const RunningStats& stats, size_t& idx) {
+    for (auto& e : submodules_) {
+        e.mod->apply_running_stats(stats, idx);
+    }
+}
+
 void Module::propagate_mode(bool training) {
     training_ = training;
     for (auto& e : submodules_) {
