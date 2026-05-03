@@ -1,21 +1,25 @@
 #include "mlframework/model_io.hpp"
 
+#include <cuda_runtime.h>
+
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
-
 namespace mlf {
 
 static constexpr char MAGIC[4] = {'M', 'L', 'F', '1'};
-static constexpr uint32_t VERSION = 2;
+static constexpr uint32_t VERSION = 3;
 
-static void write_bytes(std::ofstream& f, const void* src, size_t n) {
+static constexpr uint8_t OPT_NONE = 0;
+static constexpr uint8_t OPT_ADAM = 1;
+
+static void write_bytes(std::ostream& f, const void* src, size_t n) {
     f.write(reinterpret_cast<const char*>(src), static_cast<std::streamsize>(n));
 }
 
-static void read_bytes(std::ifstream& f, void* dst, size_t n) {
+static void read_bytes(std::istream& f, void* dst, size_t n) {
     f.read(reinterpret_cast<char*>(dst), static_cast<std::streamsize>(n));
 }
 
@@ -189,6 +193,170 @@ ModelConfig load_model(MLP& model, const std::string& path) {
     std::cout << "  loaded.\n";
 
     return cfg;
+}
+
+void save_optimizer(const MLP& model, const Adam& opt, const CosineAnnealingWR& scheduler,
+                    const std::string& path) {
+    std::fstream f(path, std::ios::binary | std::ios::in | std::ios::out);
+    if (!f) throw std::runtime_error("cannot open for update: " + path);
+
+    // seek to end
+    f.seekp(0, std::ios::end);
+
+    // write optimizer block
+    uint8_t has_opt = 1;
+    write_bytes(f, &has_opt, sizeof(uint8_t));
+    uint8_t opt_type = OPT_ADAM;
+    write_bytes(f, &opt_type, sizeof(uint8_t));
+
+    size_t t = opt.step_count();
+    write_bytes(f, &t, sizeof(size_t));
+
+    size_t num_params = opt.num_params();
+    write_bytes(f, &num_params, sizeof(size_t));
+
+    std::vector<float> host_buf;
+    for (size_t i = 0; i < num_params; i++) {
+        size_t n = opt.param_numel(i);
+        write_bytes(f, &n, sizeof(size_t));
+
+        host_buf.resize(n);
+
+        if (opt.on_cuda()) {
+            cudaMemcpy(host_buf.data(), opt.cuda_m()[i].get(), n * sizeof(float),
+                       cudaMemcpyDeviceToHost);
+            write_bytes(f, host_buf.data(), n * sizeof(float));
+            cudaMemcpy(host_buf.data(), opt.cuda_v()[i].get(), n * sizeof(float),
+                       cudaMemcpyDeviceToHost);
+            write_bytes(f, host_buf.data(), n * sizeof(float));
+        } else {
+            write_bytes(f, opt.cpu_m()[i].data(), n * sizeof(float));
+            write_bytes(f, opt.cpu_v()[i].data(), n * sizeof(float));
+        }
+    }
+
+    // scheduler block
+    size_t t_cur = scheduler.t_cur();
+    size_t T_cur = scheduler.T_cur();
+    float lr_max = scheduler.lr_max();
+    float lr_min = scheduler.lr_min();
+    size_t T0 = scheduler.T0();
+    float T_mult = scheduler.T_mult();
+
+    write_bytes(f, &t_cur, sizeof(size_t));
+    write_bytes(f, &T_cur, sizeof(size_t));
+    write_bytes(f, &lr_max, sizeof(float));
+    write_bytes(f, &lr_min, sizeof(float));
+    write_bytes(f, &T0, sizeof(size_t));
+    write_bytes(f, &T_mult, sizeof(float));
+
+    f.flush();
+    std::cout << "Optimizer state saved.\n";
+}
+
+void load_optimizer(Adam& opt, CosineAnnealingWR& scheduler, const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) throw std::runtime_error("cannot open: " + path);
+
+    // skip header
+    uint32_t magic_dummy[2];  // magic(4) + version(4)
+    read_bytes(f, magic_dummy, 8);
+
+    // skip architecture
+    size_t input_size, num_hidden;
+    read_bytes(f, &input_size, sizeof(size_t));
+    read_bytes(f, &num_hidden, sizeof(size_t));
+    for (size_t i = 0; i < num_hidden; i++) {
+        size_t h;
+        read_bytes(f, &h, sizeof(size_t));
+    }
+    size_t output_size;
+    float dropout_p;
+    uint8_t bn;
+    read_bytes(f, &output_size, sizeof(size_t));
+    read_bytes(f, &dropout_p, sizeof(float));
+    read_bytes(f, &bn, sizeof(uint8_t));
+
+    // skip tensors
+    size_t num_tensors;
+    read_bytes(f, &num_tensors, sizeof(size_t));
+    for (size_t i = 0; i < num_tensors; i++) {
+        size_t rank;
+        read_bytes(f, &rank, sizeof(size_t));
+        size_t numel = 1;
+        for (size_t d = 0; d < rank; d++) {
+            size_t dim;
+            read_bytes(f, &dim, sizeof(size_t));
+            numel *= dim;
+        }
+        f.seekg(numel * sizeof(float), std::ios::cur);
+    }
+
+    // skip running stats
+    size_t num_blocks;
+    read_bytes(f, &num_blocks, sizeof(size_t));
+    for (size_t i = 0; i < num_blocks; i++) {
+        size_t n;
+        read_bytes(f, &n, sizeof(size_t));
+        f.seekg(2 * n * sizeof(float), std::ios::cur);
+    }
+
+    // read optimizer block
+    uint8_t has_opt = 0;
+    read_bytes(f, &has_opt, sizeof(uint8_t));
+    if (!has_opt) {
+        throw std::runtime_error(
+            "model file has no optimizer state — was it saved with --save-opt?");
+    }
+
+    uint8_t opt_type = 0;
+    read_bytes(f, &opt_type, sizeof(uint8_t));
+    if (opt_type != OPT_ADAM) {
+        throw std::runtime_error("optimizer type mismatch: file contains type " +
+                                 std::to_string(opt_type) + ", expected Adam (1)");
+    }
+
+    size_t t = 0;
+    read_bytes(f, &t, sizeof(size_t));
+
+    size_t num_params = 0;
+    read_bytes(f, &num_params, sizeof(size_t));
+    if (num_params != opt.num_params()) {
+        throw std::runtime_error("optimizer param count mismatch: expected " +
+                                 std::to_string(opt.num_params()) + ", got " +
+                                 std::to_string(num_params));
+    }
+
+    std::vector<std::vector<float>> m(num_params), v(num_params);
+    for (size_t i = 0; i < num_params; i++) {
+        size_t n = 0;
+        read_bytes(f, &n, sizeof(size_t));
+        if (n != opt.param_numel(i)) {
+            throw std::runtime_error("optimizer param " + std::to_string(i) + " numel mismatch");
+        }
+        m[i].resize(n);
+        v[i].resize(n);
+        read_bytes(f, m[i].data(), n * sizeof(float));
+        read_bytes(f, v[i].data(), n * sizeof(float));
+    }
+
+    opt.restore_state(t, std::move(m), std::move(v));
+
+    // read scheduler block
+    size_t t_cur, T_cur, T0;
+    float lr_max, lr_min, T_mult;
+    read_bytes(f, &t_cur, sizeof(size_t));
+    read_bytes(f, &T_cur, sizeof(size_t));
+    read_bytes(f, &lr_max, sizeof(float));
+    read_bytes(f, &lr_min, sizeof(float));
+    read_bytes(f, &T0, sizeof(size_t));
+    read_bytes(f, &T_mult, sizeof(float));
+
+    scheduler = CosineAnnealingWR(lr_max, lr_min, T0, T_mult);
+    scheduler.restore_state(t_cur, T_cur);
+
+    std::cout << "  Optimizer state loaded (Adam step=" << t << ", scheduler t_cur=" << t_cur << "/"
+              << T_cur << ")\n";
 }
 
 }  // namespace mlf

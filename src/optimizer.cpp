@@ -98,6 +98,23 @@ void Adam::zero_grad() {
     }
 }
 
+void Adam::restore_state(size_t t, std::vector<std::vector<float>> m,
+                         std::vector<std::vector<float>> v) {
+    t_ = t;
+    if (on_cuda()) {
+        // upload m and v to CUDA
+        for (size_t i = 0; i < params_.size(); i++) {
+            cudaMemcpy(cuda_m_[i].get(), m[i].data(), m[i].size() * sizeof(float),
+                       cudaMemcpyHostToDevice);
+            cudaMemcpy(cuda_v_[i].get(), v[i].data(), v[i].size() * sizeof(float),
+                       cudaMemcpyHostToDevice);
+        }
+    } else {
+        m_ = std::move(m);
+        v_ = std::move(v);
+    }
+}
+
 CosineAnnealingWR::CosineAnnealingWR(float lr_max, float lr_min, size_t T0, float T_mult)
     : lr_max_(lr_max), lr_min_(lr_min), T0_(T0), T_mult_(T_mult), T_cur_(T0) {}
 

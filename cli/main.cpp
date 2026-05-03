@@ -99,6 +99,8 @@ int main(int argc, char* argv[]) {
     bool eval_only = false;
     std::string model_type = "mlp";
     std::string device_str = "cpu";
+    bool save_opt = false;
+    bool load_opt = false;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -128,6 +130,12 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--device" && i + 1 < argc) {
             device_str = argv[++i];
+        }
+        if (arg == "--save-opt") {
+            save_opt = true;
+        }
+        if (arg == "--load-opt") {
+            load_opt = true;
         }
     }
 
@@ -163,6 +171,16 @@ int main(int argc, char* argv[]) {
         std::cout << "Model: MLP (784→128→64→10)\n";
     }
 
+    if (!load_path.empty()) {
+        // load only supported for MLP for now
+        if (model.type != Model::Type::MLP) {
+            std::cerr << "Error: --load currently only supported for --model mlp\n";
+            return 1;
+        }
+        ModelConfig cfg;
+        cfg = load_model(*model.mlp, load_path);
+    }
+
     if (device_str == "cuda") {
         std::cout << "Moving model to CUDA...\n";
         if (model.type == Model::Type::MLP)
@@ -173,16 +191,6 @@ int main(int argc, char* argv[]) {
     }
 
     Device active_device = (device_str == "cuda") ? Device::CUDA : Device::CPU;
-
-    if (!load_path.empty()) {
-        // load only supported for MLP for now
-        if (model.type != Model::Type::MLP) {
-            std::cerr << "Error: --load currently only supported for --model mlp\n";
-            return 1;
-        }
-        ModelConfig cfg;
-        cfg = load_model(*model.mlp, load_path);
-    }
 
     if (eval_only) {
         float acc = compute_accuracy(model, test_loader, active_device);
@@ -196,7 +204,20 @@ int main(int argc, char* argv[]) {
     Adam opt(model.parameters(), lr);
     CosineAnnealingWR scheduler(lr, 1e-5F, 5, 2.0F);  // T0=5, doubles each restart
 
-    std::cout << "lr_max=" << lr << "  lr_min=1e-5  T0=5  T_mult=2\n\n";
+    if (load_opt) {
+        if (load_path.empty()) {
+            std::cerr << "Error: --load-opt requires --load\n";
+            return 1;
+        }
+        load_optimizer(opt, scheduler, load_path);
+        // lr comes from restored scheduler, not --lr flag
+        opt.set_lr(scheduler.get_lr());
+        std::cout << "  Resuming at lr=" << scheduler.get_lr() << "\n";
+        // TODO(#7): warn if user also passed --lr explicitly
+    }
+
+    std::cout << "lr_max=" << scheduler.lr_max() << "  lr_min=" << scheduler.lr_min()
+              << "  T0=" << scheduler.T0() << "  T_mult=" << scheduler.T_mult() << "\n\n";
 
     for (size_t epoch = 1; epoch <= epochs; epoch++) {
         float current_lr = scheduler.get_lr();
@@ -212,7 +233,7 @@ int main(int argc, char* argv[]) {
             auto labels = (active_device == Device::CUDA) ? to(b.labels, Device::CUDA) : b.labels;
             opt.zero_grad();
             auto logits = model.forward(input);
-            auto loss = cross_entropy(logits, b.labels);
+            auto loss = cross_entropy(logits, labels);
             loss->backward();
 
             if (active_device == Device::CUDA) cudaDeviceSynchronize();
@@ -249,6 +270,10 @@ int main(int argc, char* argv[]) {
             }
             ModelConfig cfg{784, {128, 64}, 10, 0.3F, true};
             save_model(*model.mlp, cfg, save_path);
+        }
+
+        if (save_opt) {
+            save_optimizer(*model.mlp, opt, scheduler, save_path);
         }
     }
 

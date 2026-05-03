@@ -3,6 +3,7 @@
 #include <string>
 
 #include "mlframework/mlp.hpp"
+#include "mlframework/optimizer.hpp"
 
 namespace mlf {
 
@@ -16,5 +17,10 @@ struct ModelConfig {
 
 void save_model(const MLP& model, const ModelConfig& config, const std::string& path);
 ModelConfig load_model(MLP& model, const std::string& path);
+
+void save_optimizer(const MLP& model, const Adam& opt, const CosineAnnealingWR& scheduler,
+                    const std::string& path);
+
+void load_optimizer(Adam& opt, CosineAnnealingWR& scheduler, const std::string& path);
 
 }  // namespace mlf
