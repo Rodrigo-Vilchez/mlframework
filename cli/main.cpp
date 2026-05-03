@@ -101,6 +101,7 @@ int main(int argc, char* argv[]) {
     std::string device_str = "cpu";
     bool save_opt = false;
     bool load_opt = false;
+    bool lr_explicitly_set = false;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -112,9 +113,6 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--batch" && i + 1 < argc) {
             batch_size = std::stoul(argv[++i]);
-        }
-        if (arg == "--lr" && i + 1 < argc) {
-            lr = std::stof(argv[++i]);
         }
         if (arg == "--save" && i + 1 < argc) {
             save_path = (argv[++i]);
@@ -136,6 +134,10 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--load-opt") {
             load_opt = true;
+        }
+        if (arg == "--lr" && i + 1 < argc) {
+            lr = std::stof(argv[++i]);
+            lr_explicitly_set = true;
         }
     }
 
@@ -212,8 +214,13 @@ int main(int argc, char* argv[]) {
         load_optimizer(opt, scheduler, load_path);
         // lr comes from restored scheduler, not --lr flag
         opt.set_lr(scheduler.get_lr());
+
+        if (lr_explicitly_set) {
+            std::cerr << "Warning: --lr " << lr << " ignored when --load-opt is active. "
+                      << "Resuming with lr=" << scheduler.get_lr() << " (restored from file).\n";
+        }
+
         std::cout << "  Resuming at lr=" << scheduler.get_lr() << "\n";
-        // TODO(#7): warn if user also passed --lr explicitly
     }
 
     std::cout << "lr_max=" << scheduler.lr_max() << "  lr_min=" << scheduler.lr_min()
