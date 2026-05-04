@@ -1,11 +1,16 @@
 #pragma once
 
 #include <string>
+#include <variant>
 
+#include "mlframework/cnn.hpp"
 #include "mlframework/mlp.hpp"
+#include "mlframework/module.hpp"
 #include "mlframework/optimizer.hpp"
 
 namespace mlf {
+
+enum class ModelType : uint32_t { MLP = 1, CNN = 2 };
 
 struct ModelConfig {
     size_t input_size;
@@ -15,10 +20,21 @@ struct ModelConfig {
     bool use_batchnorm;
 };
 
-void save_model(const MLP& model, const ModelConfig& config, const std::string& path);
-ModelConfig load_model(MLP& model, const std::string& path);
+struct CNNConfig {
+    float dropout_p;
+};
 
-void save_optimizer(const MLP& model, const Adam& opt, const CosineAnnealingWR& scheduler,
+using ConfigVariant = std::variant<ModelConfig, CNNConfig>;
+
+// peek at file header without loading weights
+ModelType peek_model_type(const std::string& path);
+
+void save_model(const Module& model, ModelType type, const ConfigVariant& config,
+                const std::string& path);
+
+ConfigVariant load_model(Module& model, ModelType type, const std::string& path);
+
+void save_optimizer(const Module& model, const Adam& opt, const CosineAnnealingWR& scheduler,
                     const std::string& path);
 
 void load_optimizer(Adam& opt, CosineAnnealingWR& scheduler, const std::string& path);

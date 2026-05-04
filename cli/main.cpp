@@ -173,14 +173,14 @@ int main(int argc, char* argv[]) {
         std::cout << "Model: MLP (784→128→64→10)\n";
     }
 
+    // load
     if (!load_path.empty()) {
-        // load only supported for MLP for now
-        if (model.type != Model::Type::MLP) {
-            std::cerr << "Error: --load currently only supported for --model mlp\n";
-            return 1;
-        }
-        ModelConfig cfg;
-        cfg = load_model(*model.mlp, load_path);
+        ModelType file_type = peek_model_type(load_path);
+        if (file_type == ModelType::MLP && model.type != Model::Type::MLP)
+            throw std::runtime_error("file contains MLP but --model cnn was specified");
+        if (file_type == ModelType::CNN && model.type != Model::Type::CNN)
+            throw std::runtime_error("file contains CNN but --model mlp was specified");
+        load_model(model.module(), file_type, load_path);
     }
 
     if (device_str == "cuda") {
@@ -266,21 +266,22 @@ int main(int argc, char* argv[]) {
         scheduler.step();
     }
 
+    // save
     if (!save_path.empty()) {
-        if (model.type != Model::Type::MLP) {
-            std::cerr << "Warning: --save currently only supported for --model mlp\n";
-        } else {
-            size_t slash = save_path.rfind('/');
-            if (slash != std::string::npos) {
-                std::string cmd = "mkdir -p " + save_path.substr(0, slash);
-                std::system(cmd.c_str());
-            }
-            ModelConfig cfg{784, {128, 64}, 10, 0.3F, true};
-            save_model(*model.mlp, cfg, save_path);
+        size_t slash = save_path.rfind('/');
+        if (slash != std::string::npos) {
+            std::string cmd = "mkdir -p " + save_path.substr(0, slash);
+            std::system(cmd.c_str());
         }
-
+        if (model.type == Model::Type::MLP) {
+            ModelConfig cfg{784, {128, 64}, 10, 0.3F, true};
+            save_model(*model.mlp, ModelType::MLP, cfg, save_path);
+        } else {
+            CNNConfig cfg{0.3F};
+            save_model(*model.cnn, ModelType::CNN, cfg, save_path);
+        }
         if (save_opt) {
-            save_optimizer(*model.mlp, opt, scheduler, save_path);
+            save_optimizer(model.module(), opt, scheduler, save_path);
         }
     }
 

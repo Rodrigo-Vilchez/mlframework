@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(mlframework VERSION 0.4.0 LANGUAGES CXX CUDA)
+project(mlframework VERSION 0.5.0 LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,6 +48,3 @@ target_link_libraries(mlframework PRIVATE mlframework_core)
 
 add_executable(tests tests/test_tensor.cpp)
 target_link_libraries(tests PRIVATE mlframework_core)
-
-add_executable(test_mlp_cuda /tmp/test_mlp_cuda.cpp)
-target_link_libraries(test_mlp_cuda PRIVATE mlframework_core)
