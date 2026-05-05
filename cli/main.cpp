@@ -51,7 +51,7 @@ static TensorPtr prepare_input(TensorPtr images, Model::Type type, Device device
     return out;
 }
 
-static float compute_accuracy(Model& model, MNISTLoader& loader, Device active_device) {
+static float compute_accuracy(Model& model, IDXLoader& loader, Device active_device) {
     loader.reset();
     size_t correct = 0;
     size_t total = 0;
@@ -151,21 +151,20 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "Loading MNIST from " << data_dir << "...\n";
+    std::cout << "Loading dataset from " << data_dir << "...\n";
 
-    MNISTLoader train_loader(data_dir + "/train-images-idx3-ubyte",
-                             data_dir + "/train-labels-idx1-ubyte", batch_size, true);
-    MNISTLoader test_loader(data_dir + "/t10k-images-idx3-ubyte",
-                            data_dir + "/t10k-labels-idx1-ubyte", batch_size, false);
+    IDXLoader train_loader(data_dir, batch_size, true);
+    IDXLoader test_loader(data_dir, batch_size, false);
 
     std::cout << "Train samples : " << train_loader.num_samples() << "\n";
-    std::cout << "Test  samples : " << test_loader.num_samples() << "\n\n";
+    std::cout << "Test  samples : " << test_loader.num_samples() << "\n";
+    std::cout << "Feature size  : " << train_loader.feature_size() << "\n\n";
 
     // build model
     Model model;
     if (model_type == "cnn") {
         model.type = Model::Type::CNN;
-        model.cnn = std::make_unique<CNN>(0.3F);
+        model.cnn = std::make_unique<CNN>();
         std::cout << "Model: CNN (conv1→conv2→fc1→fc2)\n";
     } else {
         model.type = Model::Type::MLP;
@@ -176,10 +175,17 @@ int main(int argc, char* argv[]) {
     // load
     if (!load_path.empty()) {
         ModelType file_type = peek_model_type(load_path);
+
         if (file_type == ModelType::MLP && model.type != Model::Type::MLP)
             throw std::runtime_error("file contains MLP but --model cnn was specified");
         if (file_type == ModelType::CNN && model.type != Model::Type::CNN)
             throw std::runtime_error("file contains CNN but --model mlp was specified");
+
+        if (file_type == ModelType::CNN) {
+            CNNConfig cfg = peek_cnn_config(load_path);
+            model.cnn = std::make_unique<CNN>(cfg);
+        }
+
         load_model(model.module(), file_type, load_path);
     }
 
@@ -277,8 +283,7 @@ int main(int argc, char* argv[]) {
             ModelConfig cfg{784, {128, 64}, 10, 0.3F, true};
             save_model(*model.mlp, ModelType::MLP, cfg, save_path);
         } else {
-            CNNConfig cfg{0.3F};
-            save_model(*model.cnn, ModelType::CNN, cfg, save_path);
+            save_model(*model.cnn, ModelType::CNN, model.cnn->config(), save_path);
         }
         if (save_opt) {
             save_optimizer(model.module(), opt, scheduler, save_path);
