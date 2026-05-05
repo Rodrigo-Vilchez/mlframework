@@ -2,18 +2,16 @@
 
 #include <cuda_runtime.h>
 
-#include <cstdint>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+
 namespace mlf {
 
 static constexpr char MAGIC[4] = {'M', 'L', 'F', '1'};
-static constexpr uint32_t VERSION = 4;
-
-static constexpr uint8_t OPT_NONE = 0;
-static constexpr uint8_t OPT_ADAM = 1;
+static constexpr uint32_t VERSION = 5;
 
 static void write_bytes(std::ostream& f, const void* src, size_t n) {
     f.write(reinterpret_cast<const char*>(src), static_cast<std::streamsize>(n));
@@ -23,21 +21,132 @@ static void read_bytes(std::istream& f, void* dst, size_t n) {
     f.read(reinterpret_cast<char*>(dst), static_cast<std::streamsize>(n));
 }
 
-ModelType peek_model_type(const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) throw std::runtime_error("cannot open: " + path);
+// --- architecture helpers ---
+
+static void write_mlp_architecture(std::ostream& f, const ModelConfig& cfg) {
+    write_bytes(f, &cfg.input_size, sizeof(size_t));
+    size_t num_hidden = cfg.hidden_sizes.size();
+    write_bytes(f, &num_hidden, sizeof(size_t));
+    for (size_t h : cfg.hidden_sizes) write_bytes(f, &h, sizeof(size_t));
+    write_bytes(f, &cfg.output_size, sizeof(size_t));
+    write_bytes(f, &cfg.dropout_p, sizeof(float));
+    uint8_t bn = cfg.use_batchnorm ? 1 : 0;
+    write_bytes(f, &bn, sizeof(uint8_t));
+}
+
+static void read_mlp_architecture(std::istream& f, ModelConfig& cfg) {
+    read_bytes(f, &cfg.input_size, sizeof(size_t));
+    size_t num_hidden = 0;
+    read_bytes(f, &num_hidden, sizeof(size_t));
+    cfg.hidden_sizes.resize(num_hidden);
+    for (size_t& h : cfg.hidden_sizes) read_bytes(f, &h, sizeof(size_t));
+    read_bytes(f, &cfg.output_size, sizeof(size_t));
+    read_bytes(f, &cfg.dropout_p, sizeof(float));
+    uint8_t bn = 0;
+    read_bytes(f, &bn, sizeof(uint8_t));
+    cfg.use_batchnorm = (bn != 0);
+}
+
+static void write_cnn_architecture(std::ostream& f, const CNNConfig& cfg) {
+    write_bytes(f, &cfg.input_channels, sizeof(size_t));
+    write_bytes(f, &cfg.input_size, sizeof(size_t));
+    size_t num_conv = cfg.conv_layers.size();
+    write_bytes(f, &num_conv, sizeof(size_t));
+    for (const auto& blk : cfg.conv_layers) {
+        write_bytes(f, &blk.out_channels, sizeof(size_t));
+        write_bytes(f, &blk.kernel_size, sizeof(size_t));
+        write_bytes(f, &blk.stride, sizeof(size_t));
+        write_bytes(f, &blk.padding, sizeof(size_t));
+        uint8_t pool = blk.pool ? 1 : 0;
+        write_bytes(f, &pool, sizeof(uint8_t));
+        write_bytes(f, &blk.pool_k, sizeof(size_t));
+        write_bytes(f, &blk.pool_s, sizeof(size_t));
+    }
+    write_bytes(f, &cfg.hidden_dim, sizeof(size_t));
+    write_bytes(f, &cfg.output_size, sizeof(size_t));
+    write_bytes(f, &cfg.dropout_p, sizeof(float));
+}
+
+static void read_cnn_architecture(std::istream& f, CNNConfig& cfg) {
+    read_bytes(f, &cfg.input_channels, sizeof(size_t));
+    read_bytes(f, &cfg.input_size, sizeof(size_t));
+    size_t num_conv = 0;
+    read_bytes(f, &num_conv, sizeof(size_t));
+    cfg.conv_layers.resize(num_conv);
+    for (auto& blk : cfg.conv_layers) {
+        read_bytes(f, &blk.out_channels, sizeof(size_t));
+        read_bytes(f, &blk.kernel_size, sizeof(size_t));
+        read_bytes(f, &blk.stride, sizeof(size_t));
+        read_bytes(f, &blk.padding, sizeof(size_t));
+        uint8_t pool = 0;
+        read_bytes(f, &pool, sizeof(uint8_t));
+        blk.pool = (pool != 0);
+        read_bytes(f, &blk.pool_k, sizeof(size_t));
+        read_bytes(f, &blk.pool_s, sizeof(size_t));
+    }
+    read_bytes(f, &cfg.hidden_dim, sizeof(size_t));
+    read_bytes(f, &cfg.output_size, sizeof(size_t));
+    read_bytes(f, &cfg.dropout_p, sizeof(float));
+}
+
+// skips architecture block without capturing values (used by load_optimizer)
+static void skip_architecture(std::istream& f, ModelType type) {
+    if (type == ModelType::MLP) {
+        size_t input_size = 0, num_hidden = 0;
+        read_bytes(f, &input_size, sizeof(size_t));
+        read_bytes(f, &num_hidden, sizeof(size_t));
+        f.seekg(static_cast<std::streamoff>(num_hidden * sizeof(size_t) + sizeof(size_t) +
+                                            sizeof(float) + sizeof(uint8_t)),
+                std::ios::cur);
+    } else {
+        size_t ic = 0, is = 0, num_conv = 0;
+        read_bytes(f, &ic, sizeof(size_t));
+        read_bytes(f, &is, sizeof(size_t));
+        read_bytes(f, &num_conv, sizeof(size_t));
+        // each ConvBlockConfig: 4*size_t + uint8_t + 2*size_t
+        constexpr size_t blk_bytes = 4 * sizeof(size_t) + sizeof(uint8_t) + 2 * sizeof(size_t);
+        f.seekg(
+            static_cast<std::streamoff>(num_conv * blk_bytes + 2 * sizeof(size_t) + sizeof(float)),
+            std::ios::cur);
+    }
+}
+
+// --- header helpers ---
+
+static void validate_header(std::ifstream& f, const std::string& path) {
     char magic[4];
     read_bytes(f, magic, 4);
     if (std::memcmp(magic, MAGIC, 4) != 0)
-        throw std::runtime_error("invalid magic number (expected MLF1)");
+        throw std::runtime_error("invalid magic number (expected MLF1): " + path);
     uint32_t version = 0;
     read_bytes(f, &version, sizeof(version));
-    if (version < 4)
-        throw std::runtime_error("file version " + std::to_string(version) +
-                                 " does not support ModelType field (requires version 4)");
+    if (version != VERSION)
+        throw std::runtime_error("unsupported version (got " + std::to_string(version) +
+                                 ", expected " + std::to_string(VERSION) + "): " + path);
+}
+
+// --- public API ---
+
+ModelType peek_model_type(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) throw std::runtime_error("cannot open: " + path);
+    validate_header(f, path);
     uint32_t type_raw = 0;
     read_bytes(f, &type_raw, sizeof(type_raw));
     return static_cast<ModelType>(type_raw);
+}
+
+CNNConfig peek_cnn_config(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) throw std::runtime_error("cannot open: " + path);
+    validate_header(f, path);
+    uint32_t type_raw = 0;
+    read_bytes(f, &type_raw, sizeof(type_raw));
+    if (static_cast<ModelType>(type_raw) != ModelType::CNN)
+        throw std::runtime_error("peek_cnn_config: file does not contain a CNN model");
+    CNNConfig cfg;
+    read_cnn_architecture(f, cfg);
+    return cfg;
 }
 
 void save_model(const Module& model, ModelType type, const ConfigVariant& config,
@@ -47,29 +156,19 @@ void save_model(const Module& model, ModelType type, const ConfigVariant& config
     std::ofstream f(path, std::ios::binary);
     if (!f) throw std::runtime_error("cannot open file for writing: " + path);
 
-    // --- header ---
+    // header
     write_bytes(f, MAGIC, 4);
     write_bytes(f, &VERSION, sizeof(VERSION));
     uint32_t type_raw = static_cast<uint32_t>(type);
     write_bytes(f, &type_raw, sizeof(type_raw));
 
-    // --- architecture ---
-    if (std::holds_alternative<ModelConfig>(config)) {
-        const auto& cfg = std::get<ModelConfig>(config);
-        write_bytes(f, &cfg.input_size, sizeof(size_t));
-        size_t num_hidden = cfg.hidden_sizes.size();
-        write_bytes(f, &num_hidden, sizeof(size_t));
-        for (size_t h : cfg.hidden_sizes) write_bytes(f, &h, sizeof(size_t));
-        write_bytes(f, &cfg.output_size, sizeof(size_t));
-        write_bytes(f, &cfg.dropout_p, sizeof(float));
-        uint8_t bn = cfg.use_batchnorm ? 1 : 0;
-        write_bytes(f, &bn, sizeof(uint8_t));
-    } else {
-        const auto& cfg = std::get<CNNConfig>(config);
-        write_bytes(f, &cfg.dropout_p, sizeof(float));
-    }
+    // architecture
+    if (std::holds_alternative<ModelConfig>(config))
+        write_mlp_architecture(f, std::get<ModelConfig>(config));
+    else
+        write_cnn_architecture(f, std::get<CNNConfig>(config));
 
-    // --- tensors ---
+    // tensors
     auto params = model.parameters();
     size_t num_tensors = params.size();
     write_bytes(f, &num_tensors, sizeof(size_t));
@@ -84,7 +183,7 @@ void save_model(const Module& model, ModelType type, const ConfigVariant& config
         total_params += p_cpu->numel();
     }
 
-    // --- running stats ---
+    // running stats
     Module::RunningStats stats;
     model.collect_running_stats(stats);
     size_t num_blocks = stats.size();
@@ -108,36 +207,18 @@ ConfigVariant load_model(Module& model, ModelType type, const std::string& path)
     std::ifstream f(path, std::ios::binary);
     if (!f) throw std::runtime_error("cannot open: " + path);
 
-    // --- header ---
-    char magic[4];
-    read_bytes(f, magic, 4);
-    if (std::memcmp(magic, MAGIC, 4) != 0)
-        throw std::runtime_error("invalid magic number (expected MLF1)");
-    uint32_t version = 0;
-    read_bytes(f, &version, sizeof(version));
-    if (version != VERSION)
-        throw std::runtime_error("unsupported version (got " + std::to_string(version) +
-                                 ", expected " + std::to_string(VERSION) + ")");
+    validate_header(f, path);
+
     uint32_t type_raw = 0;
     read_bytes(f, &type_raw, sizeof(type_raw));
     if (static_cast<ModelType>(type_raw) != type)
         throw std::runtime_error("model type mismatch in file");
 
-    // --- architecture ---
+    // read architecture for display only, the model was already constructed by caller
     ConfigVariant result_config;
     if (type == ModelType::MLP) {
         ModelConfig cfg;
-        read_bytes(f, &cfg.input_size, sizeof(size_t));
-        size_t num_hidden = 0;
-        read_bytes(f, &num_hidden, sizeof(size_t));
-        cfg.hidden_sizes.resize(num_hidden);
-        for (size_t& h : cfg.hidden_sizes) read_bytes(f, &h, sizeof(size_t));
-        read_bytes(f, &cfg.output_size, sizeof(size_t));
-        read_bytes(f, &cfg.dropout_p, sizeof(float));
-        uint8_t bn = 0;
-        read_bytes(f, &bn, sizeof(uint8_t));
-        cfg.use_batchnorm = (bn != 0);
-
+        read_mlp_architecture(f, cfg);
         std::cout << "  Architecture : " << cfg.input_size << " -> [";
         for (size_t i = 0; i < cfg.hidden_sizes.size(); i++) {
             std::cout << cfg.hidden_sizes[i];
@@ -149,13 +230,16 @@ ConfigVariant load_model(Module& model, ModelType type, const std::string& path)
         result_config = cfg;
     } else {
         CNNConfig cfg;
-        read_bytes(f, &cfg.dropout_p, sizeof(float));
-        std::cout << "  Architecture : CNN (conv1→conv2→fc1→fc2)\n";
+        read_cnn_architecture(f, cfg);
+        std::cout << "  Architecture : CNN (" << cfg.input_channels << "ch, " << cfg.input_size
+                  << "x" << cfg.input_size << ")\n";
+        std::cout << "  Conv blocks  : " << cfg.conv_layers.size() << "\n";
+        std::cout << "  Hidden dim   : " << cfg.hidden_dim << "\n";
         std::cout << "  Dropout      : " << cfg.dropout_p << "\n";
         result_config = cfg;
     }
 
-    // --- tensors ---
+    // tensors
     size_t num_tensors = 0;
     read_bytes(f, &num_tensors, sizeof(size_t));
 
@@ -177,7 +261,7 @@ ConfigVariant load_model(Module& model, ModelType type, const std::string& path)
         total_params += params[i]->numel();
     }
 
-    // --- running stats ---
+    // running stats
     size_t num_blocks = 0;
     read_bytes(f, &num_blocks, sizeof(size_t));
     Module::RunningStats stats(num_blocks);
@@ -192,25 +276,25 @@ ConfigVariant load_model(Module& model, ModelType type, const std::string& path)
     size_t idx = 0;
     model.apply_running_stats(stats, idx);
 
-    std::cout << "  Parameters   : " << total_params << "\n";
+    std::cout << "  Parameters      : " << total_params << "\n";
     std::cout << "  BatchNorm blocks: " << num_blocks << "\n";
     std::cout << "  loaded.\n";
-
     return result_config;
 }
+
+// --- optimizer persistence ---
+
+static constexpr uint8_t OPT_ADAM = 1;
 
 void save_optimizer(const Module& model, const Adam& opt, const CosineAnnealingWR& scheduler,
                     const std::string& path) {
     std::fstream f(path, std::ios::binary | std::ios::in | std::ios::out);
     if (!f) throw std::runtime_error("cannot open for update: " + path);
-
-    // seek to end
     f.seekp(0, std::ios::end);
 
-    // write optimizer block
     uint8_t has_opt = 1;
-    write_bytes(f, &has_opt, sizeof(uint8_t));
     uint8_t opt_type = OPT_ADAM;
+    write_bytes(f, &has_opt, sizeof(uint8_t));
     write_bytes(f, &opt_type, sizeof(uint8_t));
 
     size_t t = opt.step_count();
@@ -223,9 +307,7 @@ void save_optimizer(const Module& model, const Adam& opt, const CosineAnnealingW
     for (size_t i = 0; i < num_params; i++) {
         size_t n = opt.param_numel(i);
         write_bytes(f, &n, sizeof(size_t));
-
         host_buf.resize(n);
-
         if (opt.on_cuda()) {
             cudaMemcpy(host_buf.data(), opt.cuda_m()[i].get(), n * sizeof(float),
                        cudaMemcpyDeviceToHost);
@@ -239,14 +321,12 @@ void save_optimizer(const Module& model, const Adam& opt, const CosineAnnealingW
         }
     }
 
-    // scheduler block
     size_t t_cur = scheduler.t_cur();
     size_t T_cur = scheduler.T_cur();
     float lr_max = scheduler.lr_max();
     float lr_min = scheduler.lr_min();
     size_t T0 = scheduler.T0();
     float T_mult = scheduler.T_mult();
-
     write_bytes(f, &t_cur, sizeof(size_t));
     write_bytes(f, &T_cur, sizeof(size_t));
     write_bytes(f, &lr_max, sizeof(float));
@@ -262,93 +342,80 @@ void load_optimizer(Adam& opt, CosineAnnealingWR& scheduler, const std::string& 
     std::ifstream f(path, std::ios::binary);
     if (!f) throw std::runtime_error("cannot open: " + path);
 
-    // skip header
-    uint32_t header_dummy[3];
-    read_bytes(f, header_dummy, 12);
+    // skip header: magic(4) + version(4) + model_type(4)
+    char magic_skip[4];
+    read_bytes(f, magic_skip, 4);
+    uint32_t ver_skip = 0;
+    read_bytes(f, &ver_skip, sizeof(uint32_t));
+    uint32_t type_skip = 0;
+    read_bytes(f, &type_skip, sizeof(uint32_t));
+    ModelType mt = static_cast<ModelType>(type_skip);
 
-    // skip architecture
-    size_t input_size, num_hidden;
-    read_bytes(f, &input_size, sizeof(size_t));
-    read_bytes(f, &num_hidden, sizeof(size_t));
-    for (size_t i = 0; i < num_hidden; i++) {
-        size_t h;
-        read_bytes(f, &h, sizeof(size_t));
-    }
-    size_t output_size;
-    float dropout_p;
-    uint8_t bn;
-    read_bytes(f, &output_size, sizeof(size_t));
-    read_bytes(f, &dropout_p, sizeof(float));
-    read_bytes(f, &bn, sizeof(uint8_t));
+    // skip architecture (handles both MLP and CNN)
+    skip_architecture(f, mt);
 
     // skip tensors
-    size_t num_tensors;
+    size_t num_tensors = 0;
     read_bytes(f, &num_tensors, sizeof(size_t));
     for (size_t i = 0; i < num_tensors; i++) {
-        size_t rank;
+        size_t rank = 0;
         read_bytes(f, &rank, sizeof(size_t));
         size_t numel = 1;
         for (size_t d = 0; d < rank; d++) {
-            size_t dim;
+            size_t dim = 0;
             read_bytes(f, &dim, sizeof(size_t));
             numel *= dim;
         }
-        f.seekg(numel * sizeof(float), std::ios::cur);
+        f.seekg(static_cast<std::streamoff>(numel * sizeof(float)), std::ios::cur);
     }
 
     // skip running stats
-    size_t num_blocks;
+    size_t num_blocks = 0;
     read_bytes(f, &num_blocks, sizeof(size_t));
     for (size_t i = 0; i < num_blocks; i++) {
-        size_t n;
+        size_t n = 0;
         read_bytes(f, &n, sizeof(size_t));
-        f.seekg(2 * n * sizeof(float), std::ios::cur);
+        f.seekg(static_cast<std::streamoff>(2 * n * sizeof(float)), std::ios::cur);
     }
 
     // read optimizer block
     uint8_t has_opt = 0;
     read_bytes(f, &has_opt, sizeof(uint8_t));
-    if (!has_opt) {
+    if (!has_opt)
         throw std::runtime_error(
             "model file has no optimizer state — was it saved with --save-opt?");
-    }
 
     uint8_t opt_type = 0;
     read_bytes(f, &opt_type, sizeof(uint8_t));
-    if (opt_type != OPT_ADAM) {
-        throw std::runtime_error("optimizer type mismatch: file contains type " +
-                                 std::to_string(opt_type) + ", expected Adam (1)");
-    }
+    if (opt_type != OPT_ADAM)
+        throw std::runtime_error("optimizer type mismatch: expected Adam (1), got " +
+                                 std::to_string(opt_type));
 
     size_t t = 0;
     read_bytes(f, &t, sizeof(size_t));
 
     size_t num_params = 0;
     read_bytes(f, &num_params, sizeof(size_t));
-    if (num_params != opt.num_params()) {
+    if (num_params != opt.num_params())
         throw std::runtime_error("optimizer param count mismatch: expected " +
                                  std::to_string(opt.num_params()) + ", got " +
                                  std::to_string(num_params));
-    }
 
     std::vector<std::vector<float>> m(num_params), v(num_params);
     for (size_t i = 0; i < num_params; i++) {
         size_t n = 0;
         read_bytes(f, &n, sizeof(size_t));
-        if (n != opt.param_numel(i)) {
+        if (n != opt.param_numel(i))
             throw std::runtime_error("optimizer param " + std::to_string(i) + " numel mismatch");
-        }
         m[i].resize(n);
         v[i].resize(n);
         read_bytes(f, m[i].data(), n * sizeof(float));
         read_bytes(f, v[i].data(), n * sizeof(float));
     }
-
     opt.restore_state(t, std::move(m), std::move(v));
 
-    // read scheduler block
-    size_t t_cur, T_cur, T0;
-    float lr_max, lr_min, T_mult;
+    size_t t_cur = 0, T_cur = 0, T0 = 0;
+    float lr_max = 0, lr_min = 0, T_mult = 0;
     read_bytes(f, &t_cur, sizeof(size_t));
     read_bytes(f, &T_cur, sizeof(size_t));
     read_bytes(f, &lr_max, sizeof(float));

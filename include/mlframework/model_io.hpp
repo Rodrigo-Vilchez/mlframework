@@ -20,14 +20,12 @@ struct ModelConfig {
     bool use_batchnorm;
 };
 
-struct CNNConfig {
-    float dropout_p;
-};
-
 using ConfigVariant = std::variant<ModelConfig, CNNConfig>;
 
 // peek at file header without loading weights
 ModelType peek_model_type(const std::string& path);
+
+CNNConfig peek_cnn_config(const std::string& path);
 
 void save_model(const Module& model, ModelType type, const ConfigVariant& config,
                 const std::string& path);
