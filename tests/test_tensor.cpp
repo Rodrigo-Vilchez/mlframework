@@ -193,9 +193,9 @@ void test_cross_entropy_backward() {
 }
 
 void test_mnist_loader() {
-    MNISTLoader loader("data/mnist/train-images-idx3-ubyte", "data/mnist/train-labels-idx1-ubyte",
-                       32);
+    IDXLoader loader("data/mnist", 32, true);
     assert(loader.num_samples() == 60000);
+    assert(loader.feature_size() == 784);
     assert(loader.has_next());
 
     Batch b = loader.next();
@@ -203,11 +203,10 @@ void test_mnist_loader() {
     assert(b.images->shape[1] == 784);
     assert(b.labels->shape[0] == 32);
 
-    // pixel values normalized
     for (size_t i = 0; i < b.images->numel(); i++) {
         assert(b.images->data[i] >= 0.0F && b.images->data[i] <= 1.0F);
     }
-    std::cout << "[OK] MNIST loader\n";
+    std::cout << "[OK] IDX loader (MNIST)\n";
 }
 
 void test_mlp_forward_shape() {
