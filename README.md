@@ -11,7 +11,7 @@ Neural network framework implemented from scratch in C++20.
 - Optimizers: SGD (momentum), Adam
 - Layers: Linear, BatchNorm1d, Dropout, Conv2d, MaxPool2d, ReLU, Sigmoid
 - Loss: Cross-entropy with fused softmax backward
-- DataLoader: MNIST with IDX parsing and shuffle
+- DataLoader: IDX parsing and shuffle
 - LR Scheduling: Cosine Annealing with Warm Restarts
 - Model serialization: save/load architecture, weights, and BatchNorm running stats
 
@@ -36,9 +36,9 @@ models/                Saved models (not tracked)
 | `--epochs` | `5` | Number of training epochs |
 | `--batch` | `64` | Batch size |
 | `--lr` | `0.001` | Initial learning rate |
-| `--data` | `data/mnist` | Path to MNIST directory |
-| `--save` | — | Save model to path after training (only MLP for now) |
-| `--load` | — | Load model from path to evaluate or continue training (only MLP for now) |
+| `--data` | `data/mnist` | Path to dataset directory |
+| `--save` | — | Save model to path after training |
+| `--load` | — | Load model from path to evaluate or continue training |
 | `--eval-only` | — | Skip training, evaluate loaded model |
 
 ## Dependencies
@@ -87,10 +87,10 @@ cmake --preset release && cmake --build --preset release
 ./build/release/mlframework --model mlp --device cuda --epochs 15 --batch 64 --lr 0.001 --save models/mnist_mlp_v2.mlf
 
 # CNN on CPU
-./build/release/mlframework --model cnn --epochs 5 --batch 64 --lr 0.001
+./build/release/mlframework --model cnn --epochs 5 --batch 64 --lr 0.001 --save models/mnist_cnn_v1.mlf
 
 # CNN on CUDA
-./build/release/mlframework --model cnn --device cuda --epochs 5 --batch 64 --lr 0.001
+./build/release/mlframework --model cnn --device cuda --epochs 5 --batch 64 --lr 0.001 --save models/mnist_cnn_v2.mlf
 ```
 
 ### Evaluate
@@ -99,20 +99,34 @@ cmake --preset release && cmake --build --preset release
 # Evaluate on test dataset
 ./build/release/mlframework --load models/mnist_mlp_v1.mlf --eval-only
 ./build/release/mlframework --load models/mnist_mlp_v2.mlf --eval-only
+./build/release/mlframework --load models/mnist_cnn_v1.mlf --eval-only
+./build/release/mlframework --load models/mnist_cnn_v2.mlf --eval-only
 ```
 
 ### Continue training
 
 ```bash
 # MLP from CPU to CPU
-./build/release/mlframework --load models/mnist_mlp_v1.mlf --epochs 10 --lr 0.0001 --save models/mnist_mlp_v3.mlf
+./build/release/mlframework --load models/mnist_mlp_v1.mlf --epochs 10 --save models/mnist_mlp_v3.mlf
 
 # MLP from CPU to CUDA
-./build/release/mlframework --load models/mnist_mlp_v1.mlf --device cuda --epochs 10 --lr 0.0001 --save models/mnist_mlp_v4.mlf
+./build/release/mlframework --load models/mnist_mlp_v1.mlf --device cuda --epochs 10 --save models/mnist_mlp_v4.mlf
 
 # MLP from CUDA to CUDA
-./build/release/mlframework --load models/mnist_mlp_v2.mlf --device cuda --epochs 10 --lr 0.0001 --save models/mnist_mlp_v5.mlf
+./build/release/mlframework --load models/mnist_mlp_v2.mlf --device cuda --epochs 10 --save models/mnist_mlp_v5.mlf
 
 # MLP from CUDA to CPU
-./build/release/mlframework --load models/mnist_mlp_v2.mlf --epochs 10 --lr 0.0001 --save models/mnist_mlp_v6.mlf
+./build/release/mlframework --load models/mnist_mlp_v2.mlf --epochs 10 --save models/mnist_mlp_v6.mlf
+
+# CNN from CPU to CPU
+./build/release/mlframework --load models/mnist_cnn_v1.mlf --epochs 5 --save models/mnist_cnn_v3.mlf
+
+# CNN from CPU to CUDA
+./build/release/mlframework --load models/mnist_cnn_v1.mlf --device cuda --epochs 5 --save models/mnist_cnn_v4.mlf
+
+# CNN from CUDA to CUDA
+./build/release/mlframework --load models/mnist_cnn_v2.mlf --device cuda --epochs 5 --save models/mnist_cnn_v5.mlf
+
+# CNN from CUDA to CPU
+./build/release/mlframework --load models/mnist_cnn_v2.mlf --epochs 5 --save models/mnist_cnn_v6.mlf
 ```
