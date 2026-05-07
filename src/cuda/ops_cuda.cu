@@ -53,6 +53,23 @@ __global__ void kernel_mul(const float* a, const float* b, float* c, size_t n) {
     if (i < n) c[i] = a[i] * b[i];
 }
 
+__global__ void kernel_div(const float* a, const float* b, float* c, size_t n) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) c[i] = a[i] / b[i];
+}
+
+__global__ void kernel_div_backward_a(const float* grad_out, const float* b, float* grad_in,
+                                      size_t n) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) grad_in[i] += grad_out[i] / b[i];
+}
+
+__global__ void kernel_div_backward_b(const float* grad_out, const float* a, const float* b,
+                                      float* grad_in, size_t n) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) grad_in[i] -= grad_out[i] * a[i] / (b[i] * b[i]);
+}
+
 __global__ void kernel_relu(const float* x, float* y, size_t n) {
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) y[i] = x[i] > 0.0F ? x[i] : 0.0F;
@@ -160,6 +177,28 @@ TensorPtr mul_cuda(TensorPtr a, TensorPtr b) {
             if (b->requires_grad)
                 kernel_mul_backward<<<blocks(n), 256>>>(r->cuda_grad_ptr(), a->cuda_data_ptr(),
                                                         b->cuda_grad_ptr(), n);
+        };
+    }
+    return result;
+}
+
+TensorPtr div_cuda(TensorPtr a, TensorPtr b) {
+    bool rg = a->requires_grad || b->requires_grad;
+    auto result = make_tensor(a->shape, rg, Device::CUDA);
+
+    kernel_div<<<blocks(a->numel()), 256>>>(a->cuda_data_ptr(), b->cuda_data_ptr(),
+                                            result->cuda_data_ptr(), a->numel());
+    if (rg) {
+        result->inputs = {a, b};
+        result->backward_fn = [a, b, r = result.get()]() {
+            size_t n = r->numel();
+            if (a->requires_grad)
+                kernel_div_backward_a<<<blocks(n), 256>>>(r->cuda_grad_ptr(), b->cuda_data_ptr(),
+                                                          a->cuda_grad_ptr(), n);
+            if (b->requires_grad)
+                kernel_div_backward_b<<<blocks(n), 256>>>(r->cuda_grad_ptr(), a->cuda_data_ptr(),
+                                                          b->cuda_data_ptr(), b->cuda_grad_ptr(),
+                                                          n);
         };
     }
     return result;

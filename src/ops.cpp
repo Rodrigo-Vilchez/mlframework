@@ -39,7 +39,7 @@ TensorPtr add(TensorPtr a, TensorPtr b) {
 }
 
 TensorPtr sub(TensorPtr a, TensorPtr b) {
-    if (a->device == Device::CUDA) return cuda::add_cuda(a, b);
+    if (a->device == Device::CUDA) return cuda::sub_cuda(a, b);
     check_same_shape(a, b);
     bool rg = any_requires_grad(a, b);
     auto result = make_tensor(a->shape, rg);
@@ -59,7 +59,7 @@ TensorPtr sub(TensorPtr a, TensorPtr b) {
 }
 
 TensorPtr mul(TensorPtr a, TensorPtr b) {
-    if (a->device == Device::CUDA) return cuda::add_cuda(a, b);
+    if (a->device == Device::CUDA) return cuda::mul_cuda(a, b);
     check_same_shape(a, b);
     bool rg = any_requires_grad(a, b);
     auto result = make_tensor(a->shape, rg);
@@ -79,7 +79,7 @@ TensorPtr mul(TensorPtr a, TensorPtr b) {
 }
 
 TensorPtr div(TensorPtr a, TensorPtr b) {
-    if (a->device == Device::CUDA) return cuda::add_cuda(a, b);
+    if (a->device == Device::CUDA) return cuda::div_cuda(a, b);
     check_same_shape(a, b);
     bool rg = any_requires_grad(a, b);
     auto result = make_tensor(a->shape, rg);
@@ -103,7 +103,7 @@ TensorPtr div(TensorPtr a, TensorPtr b) {
 }
 
 TensorPtr matmul(TensorPtr a, TensorPtr b) {
-    if (a->device == Device::CUDA) return cuda::add_cuda(a, b);
+    if (a->device == Device::CUDA) return cuda::matmul_cuda(a, b);
     if (a->shape.size() != 2 || b->shape.size() != 2) {
         throw std::invalid_argument("matmul requires 2D tensors");
     }
@@ -172,7 +172,7 @@ TensorPtr matmul(TensorPtr a, TensorPtr b) {
 }
 
 TensorPtr add_bias(TensorPtr a, TensorPtr b) {
-    if (a->device == Device::CUDA) return cuda::add_cuda(a, b);
+    if (a->device == Device::CUDA) return cuda::add_bias_cuda(a, b);
     if (a->shape.size() != 2 || b->shape.size() != 1) {
         throw std::invalid_argument("add_bias requires a 2D tensor and a 1D bias");
     }
