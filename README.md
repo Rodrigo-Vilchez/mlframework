@@ -82,51 +82,176 @@ cmake --preset release && cmake --build --preset release
 ```bash
 # MLP on CPU
 ./build/release/mlframework --model mlp --epochs 15 --batch 64 --lr 0.001 --save models/mnist_mlp_v1.mlf
+```
+<details>
+<summary>Output</summary>
 
+![](screenshots/1.png)
+
+</details>
+
+```bash
 # MLP on CUDA
 ./build/release/mlframework --model mlp --device cuda --epochs 15 --batch 64 --lr 0.001 --save models/mnist_mlp_v2.mlf
+```
+<details>
+<summary>Output</summary>
 
+![](screenshots/2.png)
+
+</details>
+
+```bash
 # CNN on CPU
 ./build/release/mlframework --model cnn --epochs 5 --batch 64 --lr 0.001 --save models/mnist_cnn_v1.mlf
+```
+<details>
+<summary>Output</summary>
 
+![](screenshots/3.png)
+
+</details>
+
+```bash
 # CNN on CUDA
 ./build/release/mlframework --model cnn --device cuda --epochs 5 --batch 64 --lr 0.001 --save models/mnist_cnn_v2.mlf
 ```
+<details>
+<summary>Output</summary>
+
+![](screenshots/4.png)
+
+</details>
 
 ### Evaluate
 
 ```bash
 # Evaluate on test dataset
 ./build/release/mlframework --load models/mnist_mlp_v1.mlf --eval-only
+```
+<details>
+<summary>Output</summary>
+
+![](screenshots/5.png)
+
+</details>
+
+```bash
 ./build/release/mlframework --load models/mnist_mlp_v2.mlf --eval-only
+```
+<details>
+<summary>Output</summary>
+
+![](screenshots/6.png)
+
+</details>
+
+```bash
 ./build/release/mlframework --load models/mnist_cnn_v1.mlf --model cnn --eval-only
+```
+<details>
+<summary>Output</summary>
+
+![](screenshots/7.png)
+
+</details>
+
+```bash
 ./build/release/mlframework --load models/mnist_cnn_v2.mlf --model cnn --eval-only
 ```
+<details>
+<summary>Output</summary>
+
+![](screenshots/8.png)
+
+</details>
 
 ### Continue training
 
 ```bash
 # MLP from CPU to CPU
 ./build/release/mlframework --load models/mnist_mlp_v1.mlf --epochs 10 --save models/mnist_mlp_v3.mlf
+```
+<details>
+<summary>Output</summary>
 
+![](screenshots/9.png)
+
+</details>
+
+```bash
 # MLP from CPU to CUDA
 ./build/release/mlframework --load models/mnist_mlp_v1.mlf --device cuda --epochs 10 --save models/mnist_mlp_v4.mlf
+```
+<details>
+<summary>Output</summary>
 
+![](screenshots/10.png)
+
+</details>
+
+```bash
 # MLP from CUDA to CUDA
 ./build/release/mlframework --load models/mnist_mlp_v2.mlf --device cuda --epochs 10 --save models/mnist_mlp_v5.mlf
+```
+<details>
+<summary>Output</summary>
 
+![](screenshots/11.png)
+
+</details>
+
+```bash
 # MLP from CUDA to CPU
 ./build/release/mlframework --load models/mnist_mlp_v2.mlf --epochs 10 --save models/mnist_mlp_v6.mlf
+```
+<details>
+<summary>Output</summary>
 
+![](screenshots/12.png)
+
+</details>
+
+```bash
 # CNN from CPU to CPU
 ./build/release/mlframework --load models/mnist_cnn_v1.mlf --model cnn --epochs 5 --save models/mnist_cnn_v3.mlf
+```
+<details>
+<summary>Output</summary>
 
+![](screenshots/13.png)
+
+</details>
+
+```bash
 # CNN from CPU to CUDA
 ./build/release/mlframework --load models/mnist_cnn_v1.mlf --model cnn --device cuda --epochs 5 --save models/mnist_cnn_v4.mlf
+```
+<details>
+<summary>Output</summary>
 
+![](screenshots/14.png)
+
+</details>
+
+```bash
 # CNN from CUDA to CUDA
 ./build/release/mlframework --load models/mnist_cnn_v2.mlf --model cnn --device cuda --epochs 5 --save models/mnist_cnn_v5.mlf
+```
+<details>
+<summary>Output</summary>
 
+![](screenshots/15.png)
+
+</details>
+
+```bash
 # CNN from CUDA to CPU
 ./build/release/mlframework --load models/mnist_cnn_v2.mlf --model cnn --epochs 5 --save models/mnist_cnn_v6.mlf
 ```
+<details>
+<summary>Output</summary>
+
+![](screenshots/16.png)
+
+</details>
