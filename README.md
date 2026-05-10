@@ -99,8 +99,8 @@ cmake --preset release && cmake --build --preset release
 # Evaluate on test dataset
 ./build/release/mlframework --load models/mnist_mlp_v1.mlf --eval-only
 ./build/release/mlframework --load models/mnist_mlp_v2.mlf --eval-only
-./build/release/mlframework --load models/mnist_cnn_v1.mlf --eval-only
-./build/release/mlframework --load models/mnist_cnn_v2.mlf --eval-only
+./build/release/mlframework --load models/mnist_cnn_v1.mlf --model cnn --eval-only
+./build/release/mlframework --load models/mnist_cnn_v2.mlf --model cnn --eval-only
 ```
 
 ### Continue training
@@ -119,14 +119,14 @@ cmake --preset release && cmake --build --preset release
 ./build/release/mlframework --load models/mnist_mlp_v2.mlf --epochs 10 --save models/mnist_mlp_v6.mlf
 
 # CNN from CPU to CPU
-./build/release/mlframework --load models/mnist_cnn_v1.mlf --epochs 5 --save models/mnist_cnn_v3.mlf
+./build/release/mlframework --load models/mnist_cnn_v1.mlf --model cnn --epochs 5 --save models/mnist_cnn_v3.mlf
 
 # CNN from CPU to CUDA
-./build/release/mlframework --load models/mnist_cnn_v1.mlf --device cuda --epochs 5 --save models/mnist_cnn_v4.mlf
+./build/release/mlframework --load models/mnist_cnn_v1.mlf --model cnn --device cuda --epochs 5 --save models/mnist_cnn_v4.mlf
 
 # CNN from CUDA to CUDA
-./build/release/mlframework --load models/mnist_cnn_v2.mlf --device cuda --epochs 5 --save models/mnist_cnn_v5.mlf
+./build/release/mlframework --load models/mnist_cnn_v2.mlf --model cnn --device cuda --epochs 5 --save models/mnist_cnn_v5.mlf
 
 # CNN from CUDA to CPU
-./build/release/mlframework --load models/mnist_cnn_v2.mlf --epochs 5 --save models/mnist_cnn_v6.mlf
+./build/release/mlframework --load models/mnist_cnn_v2.mlf --model cnn --epochs 5 --save models/mnist_cnn_v6.mlf
 ```
